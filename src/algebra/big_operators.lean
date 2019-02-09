@@ -316,7 +316,7 @@ by rw [← finset.prod_union (finset.filter_inter_filter_neg_eq s), finset.filte
 -- TODO These next few should probably also be proved without the assumption of commutativity.
 @[to_additive finset.Ico_sum_split]
 lemma Ico_prod_split (l n m : ℕ) (h₁ : n ≤ l) (h₂ : l ≤ m) (f : ℕ → β) :
-(Ico n m).prod f = (Ico n l).prod f * (Ico l m).prod f :=
+  (Ico n m).prod f = (Ico n l).prod f * (Ico l m).prod f :=
 begin
   rw prod_filter (Ico n m) f (λ x, x < l),
   rw filter_not,
