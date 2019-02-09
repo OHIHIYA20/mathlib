@@ -338,7 +338,7 @@ begin
 end
 
 lemma Ico_prod_split_last (n m : ℕ) (h : m > n) (f : ℕ → β) :
-(Ico n m).prod f = (Ico n (m-1)).prod f * f (m-1) :=
+  (Ico n m).prod f = (Ico n (m-1)).prod f * f (m-1) :=
 begin
   rw Ico_prod_split (m-1),
   rw finset.Ico.pred_singleton,
