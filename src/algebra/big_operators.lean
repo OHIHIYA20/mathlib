@@ -310,7 +310,7 @@ calc s.prod f = s.prod (λx, 1) : finset.prod_congr rfl h
 @[to_additive finset.sum_filter]
 lemma prod_filter [decidable_eq α] [comm_monoid β]
   (s : finset α) (f : α → β) (P : α → Prop) [decidable_pred P] :
-s.prod f = (s.filter P).prod f * (s.filter (λ a, ¬ P a)).prod f :=
+  s.prod f = (s.filter P).prod f * (s.filter (λ a, ¬ P a)).prod f :=
 by rw [← finset.prod_union (finset.filter_inter_filter_neg_eq s), finset.filter_union_filter_neg_eq]
 
 -- TODO These next few should probably also be proved without the assumption of commutativity.
