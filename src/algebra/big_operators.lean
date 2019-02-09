@@ -380,7 +380,7 @@ end.
 
 @[to_additive finset.Ico_sum_reindex_left]
 lemma Ico_prod_reindex_left (k n m : ℕ) (h : k ≤ n) (f : ℕ → β) :
-(Ico n m).prod f = (Ico (n-k) (m-k)).prod (λ x, f (x + k)) :=
+  (Ico n m).prod f = (Ico (n-k) (m-k)).prod (λ x, f (x + k)) :=
 begin
   apply prod_bij (λ a ∈ Ico n m, a - k),
   { intros a ha, dsimp at *, simp at *, cases ha, fsplit,
