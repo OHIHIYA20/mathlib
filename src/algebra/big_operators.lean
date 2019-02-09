@@ -325,8 +325,8 @@ begin
   rw max_eq_right h₁,
 end
 
--- `to_additive` chokes on this one, so we reprove it by hand below
-lemma Ico_prod_split_first (n m : ℕ) (h₁ : n < m) (f : ℕ → β) :
+-- `to_additive` chokes on this one, so we reprove it below
+lemma Ico_prod_split_first (n m : ℕ) (h : n < m) (f : ℕ → β) :
 (Ico n m).prod f = f n * (Ico (n+1) m).prod f :=
 begin
   rw Ico_prod_split (n+1),
@@ -334,7 +334,7 @@ begin
   simp,
   -- sad that `linarith` can't solve these last two
   exact nat.le_succ _,
-  exact nat.succ_le_of_lt h₁,
+  exact nat.succ_le_of_lt h,
 end
 
 lemma Ico_prod_split_last (n m : ℕ) (h : m > n) (f : ℕ → β) :
@@ -408,31 +408,14 @@ end
 end comm_monoid
 
 -- This is a duplicate of `Ico_prod_split_first` above; `to_additive` choked.
-lemma Ico_sum_split_first [add_comm_monoid β] (n m : ℕ) (h₁ : n < m) (f : ℕ → β) :
+lemma Ico_sum_split_first [add_comm_monoid β] (n m : ℕ) (h : n < m) (f : ℕ → β) :
 (Ico n m).sum f = f n + (Ico (n+1) m).sum f :=
-begin
-  rw Ico_sum_split (n+1),
-  -- and tidy up loose ends:
-  simp,
-  -- sad that `linarith` can't solve these last two
-  exact nat.le_succ _,
-  exact nat.succ_le_of_lt h₁,
-end
+@Ico_prod_split_first (multiplicative β) _ n m h f
 
 -- Duplicated from above; `to_additive` choked.
 lemma Ico_sum_split_last [add_comm_monoid β] (n m : ℕ) (h : m > n) (f : ℕ → β) :
 (Ico n m).sum f = (Ico n (m-1)).sum f + f (m-1) :=
-begin
-  rw Ico_sum_split (m-1),
-  rw finset.Ico.pred_singleton,
-  -- and tidy up loose ends:
-  simp,
-  exact nat.lt_of_le_of_lt (nat.zero_le _) h,
-  -- sad that `linarith` can't solve these last two
-  exact nat.pred_le_pred (nat.succ_le_of_lt h),
-  exact nat.sub_le _ _,
-end
-
+@Ico_prod_split_last (multiplicative β) _ n m h f
 
 lemma sum_hom [add_comm_monoid β] [add_comm_monoid γ] (g : β → γ) [is_add_monoid_hom g] :
   s.sum (λx, g (f x)) = g (s.sum f) :=
