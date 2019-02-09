@@ -350,63 +350,64 @@ begin
   exact nat.sub_le _ _,
 end
 
--- local attribute [simp] nat.add_sub_cancel nat.add_sub_cancel_left
+local attribute [-simp] add_comm
+local attribute [simp] nat.add_sub_cancel nat.add_sub_cancel_left
 
--- lemma finset.sum.reindex_right (k n m : ℕ) (f : ℕ → β) :
--- (Ico n m).sum f = (Ico (n+k) (m+k)).sum (λ x, f (x - k)) :=
--- begin
---   apply sum_bij (λ a ∈ Ico n m, a + k),
---   { tidy },
---   { tidy },
---   { tidy },
---   { intros,
---     use b - k,
---     -- Everything below here should be automated.
---     fsplit,
---     { tidy,
---       exact nat.le_sub_right_of_add_le H_left,
---       have h : k ≤ b, linarith,
---       rw ←nat.sub_lt_sub_right_iff h at H_right,
---       simp at H_right,
---       exact H_right },
---     dsimp,
---     simp at *,
---     have h : k ≤ b,
---     { cases H, transitivity k + n, apply nat.le_add_right, simp [add_comm] at H_left, assumption },
---     simp [add_comm],
---     rw add_sub_of_le h, }
--- end.
+@[to_additive finset.Ico_sum_reindex_right]
+lemma Ico_prod_reindex_right (k n m : ℕ) (f : ℕ → β) :
+(Ico n m).prod f = (Ico (n+k) (m+k)).prod (λ x, f (x - k)) :=
+begin
+  apply prod_bij (λ a ∈ Ico n m, a + k),
+  { intros a ha, dsimp at *, simp at *, assumption },
+  { intros a ha, dsimp at *, simp at * },
+  { intros a₁ a₂ ha₁ ha₂ a, dsimp at *, simp at *, assumption },
+  { intros,
+    use b - k,
+    fsplit,
+    { simp at *, cases H, fsplit,
+      { exact nat.le_sub_right_of_add_le H_left },
+      have h : k ≤ b := nat.le_trans (nat.le_add_left _ _) H_left,
+      rw ←nat.sub_lt_sub_right_iff h at H_right,
+      simp at H_right,
+      exact H_right },
+    dsimp,
+    simp at *,
+    have h : k ≤ b,
+    { cases H, transitivity k + n, apply nat.le_add_right, simp [add_comm] at H_left, assumption },
+    simp [add_comm],
+    rw nat.add_sub_of_le h, }
+end.
 
--- lemma finset.sum.reindex_left (k n m : ℕ) (h : k ≤ n) (f : ℕ → β) :
--- (Ico n m).sum f = (Ico (n-k) (m-k)).sum (λ x, f (x + k)) :=
--- begin
---   apply sum_bij (λ a ∈ Ico n m, a - k),
---   { tidy,
---     apply nat.sub_le_sub_right ha_left,
---     have h : k ≤ a := nat.le_trans h ha_left,
---     apply (nat.sub_lt_sub_right_iff h).mpr ha_right, },
---   { tidy,
---     have h : k ≤ a := nat.le_trans h ha_left,
---     rw nat.sub_add_cancel h, },
---   { tidy,
---     convert (congr_arg (λ x, x + k) a),
---     exact (nat.sub_add_cancel (nat.le_trans h ha₁_left)).symm,
---     exact (nat.sub_add_cancel (nat.le_trans h ha₂_left)).symm, },
---   { intros,
---     existsi b + k,
---     tidy,
---     convert nat.add_le_add_right H_left k,
---     exact (nat.sub_add_cancel h).symm,
---     convert nat.add_lt_add_right H_right k,
---     have h'' := nat.add_lt_of_lt_sub_right H_right,
---     have h' : k < m := lt_of_le_of_lt (nat.le_add_left k b) h'',
---     exact (nat.sub_add_cancel (le_of_lt h')).symm, }
--- end
-
+@[to_additive finset.Ico_sum_reindex_left]
+lemma Ico_prod_reindex_left (k n m : ℕ) (h : k ≤ n) (f : ℕ → β) :
+(Ico n m).prod f = (Ico (n-k) (m-k)).prod (λ x, f (x + k)) :=
+begin
+  apply prod_bij (λ a ∈ Ico n m, a - k),
+  { intros a ha, dsimp at *, simp at *, cases ha, fsplit,
+    apply nat.sub_le_sub_right ha_left,
+    have h : k ≤ a := nat.le_trans h ha_left,
+    apply (nat.sub_lt_sub_right_iff h).mpr ha_right, },
+  { intros a ha, dsimp at *, simp at *, cases ha,
+    have h : k ≤ a := nat.le_trans h ha_left,
+    rw nat.sub_add_cancel h, },
+  { intros a₁ a₂ ha₁ ha₂ a, dsimp at *, simp at *, cases ha₂, cases ha₁,
+    convert (congr_arg (λ x, x + k) a),
+    exact (nat.sub_add_cancel (nat.le_trans h ha₁_left)).symm,
+    exact (nat.sub_add_cancel (nat.le_trans h ha₂_left)).symm, },
+  { intros,
+    existsi b + k,
+    dsimp at *, simp at *, cases H, fsplit,
+    { convert nat.add_le_add_right H_left k,
+      exact (nat.sub_add_cancel h).symm },
+    convert nat.add_lt_add_right H_right k,
+    have h'' := nat.add_lt_of_lt_sub_right H_right,
+    have h' : k < m := lt_of_le_of_lt (nat.le_add_left k b) h'',
+    exact (nat.sub_add_cancel (le_of_lt h')).symm, }
+end
 
 end comm_monoid
 
--- This is a duplicate of Ico_prod_split_first above; `to_additive` choked.
+-- This is a duplicate of `Ico_prod_split_first` above; `to_additive` choked.
 lemma Ico_sum_split_first [add_comm_monoid β] (n m : ℕ) (h₁ : n < m) (f : ℕ → β) :
 (Ico n m).sum f = f n + (Ico (n+1) m).sum f :=
 begin
@@ -418,6 +419,7 @@ begin
   exact nat.succ_le_of_lt h₁,
 end
 
+-- Duplicated from above; `to_additive` choked.
 lemma Ico_sum_split_last [add_comm_monoid β] (n m : ℕ) (h : m > n) (f : ℕ → β) :
 (Ico n m).sum f = (Ico n (m-1)).sum f + f (m-1) :=
 begin
