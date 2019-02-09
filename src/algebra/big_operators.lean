@@ -307,7 +307,130 @@ lemma prod_eq_one [comm_monoid β] {f : α → β} {s : finset α} (h : ∀x∈s
 calc s.prod f = s.prod (λx, 1) : finset.prod_congr rfl h
   ... = 1 : finset.prod_const_one
 
+@[to_additive finset.sum_filter]
+lemma prod_filter [decidable_eq α] [comm_monoid β]
+  (s : finset α) (f : α → β) (P : α → Prop) [decidable_pred P] :
+s.prod f = (s.filter P).prod f * (s.filter (λ a, ¬ P a)).prod f :=
+by rw [← finset.prod_union (finset.filter_inter_filter_neg_eq s), finset.filter_union_filter_neg_eq]
+
+-- TODO These next few should probably also be proved without the assumption of commutativity.
+@[to_additive finset.Ico_sum_split]
+lemma Ico_prod_split (l n m : ℕ) (h₁ : n ≤ l) (h₂ : l ≤ m) (f : ℕ → β) :
+(Ico n m).prod f = (Ico n l).prod f * (Ico l m).prod f :=
+begin
+  rw prod_filter (Ico n m) f (λ x, x < l),
+  rw filter_not,
+  simp,
+  rw min_eq_right h₂,
+  rw max_eq_right h₁,
+end
+
+-- `to_additive` chokes on this one, so we reprove it by hand below
+lemma Ico_prod_split_first (n m : ℕ) (h₁ : n < m) (f : ℕ → β) :
+(Ico n m).prod f = f n * (Ico (n+1) m).prod f :=
+begin
+  rw Ico_prod_split (n+1),
+  -- and tidy up loose ends:
+  simp,
+  -- sad that `linarith` can't solve these last two
+  exact nat.le_succ _,
+  exact nat.succ_le_of_lt h₁,
+end
+
+lemma Ico_prod_split_last (n m : ℕ) (h : m > n) (f : ℕ → β) :
+(Ico n m).prod f = (Ico n (m-1)).prod f * f (m-1) :=
+begin
+  rw Ico_prod_split (m-1),
+  rw finset.Ico.pred_singleton,
+  -- and tidy up loose ends:
+  simp,
+  exact nat.lt_of_le_of_lt (nat.zero_le _) h,
+  -- sad that `linarith` can't solve these last two
+  exact nat.pred_le_pred (nat.succ_le_of_lt h),
+  exact nat.sub_le _ _,
+end
+
+-- local attribute [simp] nat.add_sub_cancel nat.add_sub_cancel_left
+
+-- lemma finset.sum.reindex_right (k n m : ℕ) (f : ℕ → β) :
+-- (Ico n m).sum f = (Ico (n+k) (m+k)).sum (λ x, f (x - k)) :=
+-- begin
+--   apply sum_bij (λ a ∈ Ico n m, a + k),
+--   { tidy },
+--   { tidy },
+--   { tidy },
+--   { intros,
+--     use b - k,
+--     -- Everything below here should be automated.
+--     fsplit,
+--     { tidy,
+--       exact nat.le_sub_right_of_add_le H_left,
+--       have h : k ≤ b, linarith,
+--       rw ←nat.sub_lt_sub_right_iff h at H_right,
+--       simp at H_right,
+--       exact H_right },
+--     dsimp,
+--     simp at *,
+--     have h : k ≤ b,
+--     { cases H, transitivity k + n, apply nat.le_add_right, simp [add_comm] at H_left, assumption },
+--     simp [add_comm],
+--     rw add_sub_of_le h, }
+-- end.
+
+-- lemma finset.sum.reindex_left (k n m : ℕ) (h : k ≤ n) (f : ℕ → β) :
+-- (Ico n m).sum f = (Ico (n-k) (m-k)).sum (λ x, f (x + k)) :=
+-- begin
+--   apply sum_bij (λ a ∈ Ico n m, a - k),
+--   { tidy,
+--     apply nat.sub_le_sub_right ha_left,
+--     have h : k ≤ a := nat.le_trans h ha_left,
+--     apply (nat.sub_lt_sub_right_iff h).mpr ha_right, },
+--   { tidy,
+--     have h : k ≤ a := nat.le_trans h ha_left,
+--     rw nat.sub_add_cancel h, },
+--   { tidy,
+--     convert (congr_arg (λ x, x + k) a),
+--     exact (nat.sub_add_cancel (nat.le_trans h ha₁_left)).symm,
+--     exact (nat.sub_add_cancel (nat.le_trans h ha₂_left)).symm, },
+--   { intros,
+--     existsi b + k,
+--     tidy,
+--     convert nat.add_le_add_right H_left k,
+--     exact (nat.sub_add_cancel h).symm,
+--     convert nat.add_lt_add_right H_right k,
+--     have h'' := nat.add_lt_of_lt_sub_right H_right,
+--     have h' : k < m := lt_of_le_of_lt (nat.le_add_left k b) h'',
+--     exact (nat.sub_add_cancel (le_of_lt h')).symm, }
+-- end
+
+
 end comm_monoid
+
+-- This is a duplicate of Ico_prod_split_first above; `to_additive` choked.
+lemma Ico_sum_split_first [add_comm_monoid β] (n m : ℕ) (h₁ : n < m) (f : ℕ → β) :
+(Ico n m).sum f = f n + (Ico (n+1) m).sum f :=
+begin
+  rw Ico_sum_split (n+1),
+  -- and tidy up loose ends:
+  simp,
+  -- sad that `linarith` can't solve these last two
+  exact nat.le_succ _,
+  exact nat.succ_le_of_lt h₁,
+end
+
+lemma Ico_sum_split_last [add_comm_monoid β] (n m : ℕ) (h : m > n) (f : ℕ → β) :
+(Ico n m).sum f = (Ico n (m-1)).sum f + f (m-1) :=
+begin
+  rw Ico_sum_split (m-1),
+  rw finset.Ico.pred_singleton,
+  -- and tidy up loose ends:
+  simp,
+  exact nat.lt_of_le_of_lt (nat.zero_le _) h,
+  -- sad that `linarith` can't solve these last two
+  exact nat.pred_le_pred (nat.succ_le_of_lt h),
+  exact nat.sub_le _ _,
+end
+
 
 lemma sum_hom [add_comm_monoid β] [add_comm_monoid γ] (g : β → γ) [is_add_monoid_hom g] :
   s.sum (λx, g (f x)) = g (s.sum f) :=
