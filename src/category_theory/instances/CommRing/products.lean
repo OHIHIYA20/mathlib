@@ -1,5 +1,5 @@
 import algebra.pi_instances
-import category_theory.examples.rings
+import category_theory.instances.rings
 import category_theory.limits
 
 universes u v w

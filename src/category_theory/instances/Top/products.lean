@@ -1,6 +1,6 @@
-import category_theory.examples.topological_spaces
+import category_theory.instances.topological_spaces
 import category_theory.limits.products
-import analysis.topology.continuity
+import topology.continuity
 
 universes u v w
 
