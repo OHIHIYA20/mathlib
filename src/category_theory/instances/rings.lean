@@ -3,8 +3,6 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Scott Morrison, Johannes Hölzl
 
 Introduce CommRing -- the category of commutative rings.
-
-Currently only the basic setup.
 -/
 
 import category_theory.concrete_category
@@ -14,7 +12,7 @@ import category_theory.adjunction
 import linear_algebra.multivariate_polynomial
 import algebra.ring
 
-universes u v
+universes u
 
 open category_theory
 

@@ -16,7 +16,7 @@ end tactic
 
 namespace category_theory.limits
 
-universes u v w
+universes v u w
 
 local attribute [tidy] tactic.case_bash
 
@@ -60,7 +60,7 @@ instance walking_span_category : small_category walking_span :=
 lemma walking_cospan_hom_id (X : walking_cospan.{v}) : walking_cospan_hom.id X = 𝟙 X := rfl
 lemma walking_span_hom_id (X : walking_span.{v}) : walking_span_hom.id X = 𝟙 X := rfl
 
-variables {C : Type u} [𝒞 : category.{u v} C]
+variables {C : Type u} [𝒞 : category.{v} C]
 include 𝒞
 
 def cospan {X Y Z : C} (f : X ⟶ Z) (g : Y ⟶ Z) : walking_cospan.{v} ⥤ C :=

@@ -10,12 +10,12 @@ open category_theory
 
 namespace category_theory.limits
 
-universes u v w
+universes v u w
 
 open walking_pair
 open walking_pair_hom
 
-variables {C : Type u} [𝒞 : category.{u v} C]
+variables {C : Type u} [𝒞 : category.{v} C]
 include 𝒞
 variables {X Y : C}
 variables {f g : X ⟶ Y}
@@ -50,40 +50,40 @@ instance is_coequalizer_subsingleton : subsingleton (is_coequalizer s) :=
 by dsimp [is_coequalizer]; apply_instance
 
 class has_equalizer {X Y : C} (f g : X ⟶ Y) :=
-(fork : fork.{u v} f g)
+(fork : fork f g)
 (is_equalizer : is_equalizer fork . obviously)
 class has_coequalizer {X Y : C} (f g : X ⟶ Y) :=
-(cofork : cofork.{u v} f g)
+(cofork : cofork f g)
 (is_coequalizer : is_coequalizer cofork . obviously)
 
 variable (C)
 
 -- TODO replace these
 class has_equalizers :=
-(fork : Π {X Y : C} (f g : X ⟶ Y), fork.{u v} f g)
+(fork : Π {X Y : C} (f g : X ⟶ Y), fork f g)
 (is_equalizer : Π {X Y : C} (f g : X ⟶ Y), is_equalizer (fork f g) . obviously)
 class has_coequalizers :=
-(cofork : Π {X Y : C} (f g : X ⟶ Y), cofork.{u v} f g)
+(cofork : Π {X Y : C} (f g : X ⟶ Y), cofork f g)
 (is_coequalizer : Π {X Y : C} (f g : X ⟶ Y), is_coequalizer (cofork f g) . obviously)
 
 variable {C}
 
-instance has_equalizer_of_has_equalizers [has_equalizers.{u v} C] {X Y : C} (f g : X ⟶ Y) :
-  has_equalizer.{u v} f g :=
+instance has_equalizer_of_has_equalizers [has_equalizers.{v} C] {X Y : C} (f g : X ⟶ Y) :
+  has_equalizer f g :=
 { fork := has_equalizers.fork f g,
   is_equalizer := has_equalizers.is_equalizer C f g }
-instance has_coequalizer_of_has_coequalizers [has_coequalizers.{u v} C] {X Y : C} (f g : X ⟶ Y) :
-  has_coequalizer.{u v} f g :=
+instance has_coequalizer_of_has_coequalizers [has_coequalizers.{v} C] {X Y : C} (f g : X ⟶ Y) :
+  has_coequalizer f g :=
 { cofork := has_coequalizers.cofork f g,
   is_coequalizer := has_coequalizers.is_coequalizer C f g }
 
 -- Special cases of this may be marked with [instance] as desired.
-def has_equalizers_of_has_limits [limits.has_limits_of_shape.{u v} walking_pair C] :
-  has_equalizers.{u v} C :=
+def has_equalizers_of_has_limits [limits.has_limits_of_shape walking_pair C] :
+  has_equalizers.{v} C :=
 { fork := λ X Y f g, limit.cone (pair f g),
   is_equalizer := λ X Y f g, limit.is_limit (pair f g) }
-def has_coequalizers_of_has_colimits [limits.has_colimits_of_shape.{u v} walking_pair C] :
-  has_coequalizers.{u v} C :=
+def has_coequalizers_of_has_colimits [limits.has_colimits_of_shape walking_pair C] :
+  has_coequalizers.{v} C :=
 { cofork := λ X Y f g, colimit.cocone (pair f g),
   is_coequalizer := λ X Y f g, colimit.is_colimit (pair f g) }
 
@@ -92,8 +92,8 @@ variable {C}
 section
 variables (f g)
 
-def equalizer.fork [has_equalizer f g] : fork f g := has_equalizer.fork.{u v} f g
-def coequalizer.cofork [has_coequalizer f g] : cofork f g := has_coequalizer.cofork.{u v} f g
+def equalizer.fork [has_equalizer f g] : fork f g := has_equalizer.fork f g
+def coequalizer.cofork [has_coequalizer f g] : cofork f g := has_coequalizer.cofork f g
 def equalizer [has_equalizer f g] := (equalizer.fork f g).X
 def coequalizer [has_coequalizer f g] := (coequalizer.cofork f g).X
 def equalizer.ι [has_equalizer f g] : equalizer f g ⟶ X := (equalizer.fork f g).π.app zero
@@ -160,8 +160,8 @@ def coequalizer.hom_iso [has_coequalizer f g] {P : C} :
     end ⟩,
   inv := λ p, coequalizer.desc f g p.val p.property }
 
-def has_limits_of_shape_of_has_equalizers [has_equalizers.{u v} C] :
-  limits.has_limits_of_shape.{u v} walking_pair.{v} C :=
+def has_limits_of_shape_of_has_equalizers [has_equalizers.{v} C] :
+  limits.has_limits_of_shape walking_pair.{v} C :=
 λ F,
 { cone := cone.of_fork (equalizer.fork (F.map left) (F.map right)),
   is_limit := let is_equalizer := equalizer.universal_property (F.map left) (F.map right) in
@@ -174,8 +174,8 @@ def has_limits_of_shape_of_has_equalizers [has_equalizers.{u v} C] :
     uniq' := λ s m w, is_equalizer.uniq (fork.of_cone s) m
       (λ j, begin have h := w j, cases j; simp at *; exact h end) } }
 
-def has_colimits_of_shape_of_has_coequalizers [has_coequalizers.{u v} C] :
-  limits.has_colimits_of_shape.{u v} walking_pair.{v} C :=
+def has_colimits_of_shape_of_has_coequalizers [has_coequalizers.{v} C] :
+  limits.has_colimits_of_shape walking_pair.{v} C :=
 λ F,
 { cocone := cocone.of_cofork (coequalizer.cofork (F.map left) (F.map right)),
   is_colimit :=

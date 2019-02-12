@@ -8,11 +8,11 @@ open category_theory
 
 namespace category_theory.limits
 
-universes u₁ v₁
-variables {C : Type u₁} [category.{u₁ v₁} C]
+universes v u
+variables {C : Type u} [category.{v} C]
 
 def limits_from_equalizers_and_products
-  [has_products.{u₁ v₁} C] [has_equalizers.{u₁ v₁} C] : has_limits.{u₁ v₁} C :=
+  [has_products.{v} C] [has_equalizers.{v} C] : has_limits.{v} C :=
 λ J 𝒥 F,
 { cone :=
   begin

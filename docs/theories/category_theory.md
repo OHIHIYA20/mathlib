@@ -19,10 +19,16 @@ The category of types, and the hom pairing functor, are defined in [category_the
 
 ## Universes
 
-Unfortunately in a category theory library we have to deal with universes carefully. We have the following:
+Unfortunately in a category theory library we have to deal with universes carefully.
+If `C : Type v₁`, then `category.{u₁ v₁} C` refers to a category whose morphisms
+live in universe `u₁`, and whose objects live in universe `v₁`.
+Equivalently `category.{u₁ v₁} C` may be written as just
+`category.{u₁} C` because `v₁` can be inferred from `C`.
+
+We have the following:
 
 ````
-category.{u₁ v₁}     : Type (max (u₁+1) (v₁+1))
+category.{u₁ v₁} C   : Type (max (u₁+1) (v₁+1))
 C                    : Type v₁
 D                    : Type v₂
 𝒞                    : category.{u₁ v₁} C
@@ -32,9 +38,6 @@ F G                  : functor C D
 nat_trans F G        : Type (max u₁ v₂)
 functor.category C D : category.{(max u₁ u₂ v₁ v₂) (max u₁ v₂)}
 ````
-
-In the above, `category.{u₁ v₁} C` is equivalently written as
-`category.{u₁} C` because `v₁` can be inferred from `C`.
 
 Note then that if we specialise to small categories, where `uᵢ = vᵢ`, then
 `functor.category C D : category.{max u₁ u₂}`, and so is again

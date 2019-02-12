@@ -2,10 +2,11 @@ import category_theory.instances.topological_spaces
 import category_theory.limits.products
 import topology.continuity
 
-universes u v w
+universes u
 
 open category_theory.limits
-open category_theory.examples
+open category_theory.instances
+namespace category_theory.instances
 
 def Top.pi {β : Type u} (f : β → Top.{u}) : Top :=
 { α := Π b : β, (f b), str := by apply_instance }
@@ -21,7 +22,7 @@ def Top.pi_π {β : Type u} (f : β → Top) (b : β): Top.pi f ⟶ f b :=
 
 local attribute [extensionality] subtype.eq
 
-instance : has_products.{u+1 u} Top :=
+instance : has_products.{u} Top.{u} :=
 λ β f,
 { fan :=
   { X := Top.pi f,
@@ -29,3 +30,5 @@ instance : has_products.{u+1 u} Top :=
   is_product :=
   { lift := λ s, Top.hom_pi (λ j, s.π.app j),
     uniq' := λ s m w, begin tidy, rw ←w, tidy, end } }.
+
+end category_theory.instances

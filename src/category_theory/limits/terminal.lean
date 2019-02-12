@@ -11,9 +11,9 @@ open category_theory
 
 namespace category_theory.limits
 
-universes u v
+universes v u
 
-variables {C : Type u} [𝒞 : category.{u v} C]
+variables {C : Type u} [𝒞 : category.{v} C]
 include 𝒞
 
 def is_terminal (X : C) :=
@@ -38,9 +38,9 @@ class has_initial :=
 (is_initial : is_initial initial . obviously)
 
 section terminal
-variables [has_terminal.{u v} C]
+variables [has_terminal.{v u} C]
 
-def terminal := has_terminal.terminal.{u v} C
+def terminal := has_terminal.terminal.{v u} C
 
 def has_limit_of_has_terminal : has_limit (functor.empty C) :=
 { cone := { X := terminal C, π := by tidy, },
@@ -49,11 +49,11 @@ def has_limit_of_has_terminal : has_limit (functor.empty C) :=
 variables {C}
 
 def terminal.from (X : C) : X ⟶ terminal C :=
-(has_terminal.is_terminal.{u v} C).lift { X := X, π := by tidy }.
+(has_terminal.is_terminal.{v u} C).lift { X := X, π := by tidy }.
 
 @[extensionality] def terminal.hom_ext {X : C} (f g : X ⟶ terminal C) : f = g :=
 begin
-  have h := has_terminal.is_terminal.{u v} C,
+  have h := has_terminal.is_terminal.{v u} C,
   rw h.uniq { X := X, π := by tidy } f (by tidy),
   rw h.uniq { X := X, π := by tidy } g (by tidy),
   refl,
@@ -66,9 +66,9 @@ def terminal.hom_iso {P : C} : (P ⟶ terminal C) ≅ punit :=
 end terminal
 
 section initial
-variables [has_initial.{u v} C]
+variables [has_initial.{v u} C]
 
-def initial := has_initial.initial.{u v} C
+def initial := has_initial.initial.{v u} C
 
 def has_colimit_of_has_initial : has_colimit (functor.empty C) :=
 { cocone := { X := initial C, ι := by tidy, },
@@ -77,11 +77,11 @@ def has_colimit_of_has_initial : has_colimit (functor.empty C) :=
 variables {C}
 
 def initial.to (X : C) : initial C ⟶ X :=
-(has_initial.is_initial.{u v} C).desc { X := X, ι := by tidy }.
+(has_initial.is_initial.{v u} C).desc { X := X, ι := by tidy }.
 
 @[extensionality] def initial.hom_ext {X : C} (f g : initial C ⟶ X) : f = g :=
 begin
-  have h := has_initial.is_initial.{u v} C,
+  have h := has_initial.is_initial.{v u} C,
   rw h.uniq { X := X, ι := by tidy } f (by tidy),
   rw h.uniq { X := X, ι := by tidy } g (by tidy),
   refl,
@@ -94,21 +94,21 @@ def initial.hom_iso {P : C} : (initial C ⟶ P) ≅ punit :=
 end initial
 
 -- Special cases of this may be marked with [instance] as desired.
-def has_terminal_of_has_limits [limits.has_limits.{u v} C] : has_terminal.{u v} C :=
+def has_terminal_of_has_limits [limits.has_limits.{v} C] : has_terminal.{v} C :=
 { terminal := limit (functor.empty C),
   is_terminal :=
     is_limit.of_iso_limit
       (limit.is_limit (functor.empty C)) (by tidy) }
-def has_initial_of_has_colimits [limits.has_colimits.{u v} C] : has_initial.{u v} C :=
+def has_initial_of_has_colimits [limits.has_colimits.{v} C] : has_initial.{v} C :=
 { initial := colimit (functor.empty C),
   is_initial :=
     is_colimit.of_iso_colimit
       (colimit.is_colimit (functor.empty C)) (by tidy) }
 
-def has_terminal_of_has_products [has_products.{u v} C] : has_terminal.{u v} C :=
+def has_terminal_of_has_products [has_products.{v} C] : has_terminal.{v} C :=
 { terminal := limits.pi (pempty.rec _),
   is_terminal := begin tidy, apply pi.lift, tidy, end }
-def has_initial_of_has_coproducts [has_coproducts.{u v} C] : has_initial.{u v} C :=
+def has_initial_of_has_coproducts [has_coproducts.{v} C] : has_initial.{v} C :=
 { initial := limits.sigma (pempty.rec _),
   is_initial := begin tidy, apply sigma.desc, tidy, end }
 

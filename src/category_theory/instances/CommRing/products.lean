@@ -2,9 +2,9 @@ import algebra.pi_instances
 import category_theory.instances.rings
 import category_theory.limits
 
-universes u v w
+universes u
 
-namespace category_theory.examples
+namespace category_theory.instances
 
 open category_theory
 open category_theory.limits
@@ -23,7 +23,7 @@ def CommRing.pi_π {β : Type u} (f : β → CommRing) (b : β): CommRing.pi f �
 
 local attribute [extensionality] subtype.eq
 
-instance CommRing_has_products : has_products.{v+1 v} CommRing :=
+instance CommRing_has_products : has_products.{u} CommRing.{u} :=
 λ β f,
 { fan :=
   { X := CommRing.pi f,
@@ -32,4 +32,4 @@ instance CommRing_has_products : has_products.{v+1 v} CommRing :=
   { lift := λ s, CommRing.hom_pi (λ j, s.π.app j),
     uniq' := begin tidy, rw ←w, tidy, end } }.
 
-end category_theory.examples
+end category_theory.instances
