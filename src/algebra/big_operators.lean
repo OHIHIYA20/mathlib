@@ -327,7 +327,7 @@ end
 
 -- `to_additive` chokes on this one, so we reprove it below
 lemma Ico_prod_split_first (n m : ℕ) (h : n < m) (f : ℕ → β) :
-(Ico n m).prod f = f n * (Ico (n+1) m).prod f :=
+  (Ico n m).prod f = f n * (Ico (n+1) m).prod f :=
 begin
   rw Ico_prod_split (n+1),
   -- and tidy up loose ends:
@@ -355,7 +355,7 @@ local attribute [simp] nat.add_sub_cancel nat.add_sub_cancel_left
 
 @[to_additive finset.Ico_sum_reindex_right]
 lemma Ico_prod_reindex_right (k n m : ℕ) (f : ℕ → β) :
-(Ico n m).prod f = (Ico (n+k) (m+k)).prod (λ x, f (x - k)) :=
+  (Ico n m).prod f = (Ico (n+k) (m+k)).prod (λ x, f (x - k)) :=
 begin
   apply prod_bij (λ a ∈ Ico n m, a + k),
   { intros a ha, dsimp at *, simp at *, assumption },
