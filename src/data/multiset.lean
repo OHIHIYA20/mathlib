@@ -1815,6 +1815,12 @@ quotient.induction_on₂ s t $ λ l₁ l₂, quotient.eq.trans perm_iff_count
 theorem ext' {s t : multiset α} : (∀ a, count a s = count a t) → s = t :=
 ext.2
 
+@[simp] theorem coe_inter (s t : list α) : (s ∩ t : multiset α) = (s ∩ t : list α) :=
+begin
+  ext,
+  simp,
+end
+
 theorem le_iff_count {s t : multiset α} : s ≤ t ↔ ∀ a, count a s ≤ count a t :=
 ⟨λ h a, count_le_of_le a h, λ al,
  by rw ← (ext.2 (λ a, by simp [max_eq_right (al a)]) : s ∪ t = t);
@@ -2969,6 +2975,9 @@ namespace Ico
 theorem map_add (n m k : ℕ) : (Ico n m).map ((+) k) = Ico (n + k) (m + k) :=
 congr_arg coe $ list.Ico.map_add _ _ _
 
+theorem map_sub (n m k : ℕ) (h : k ≤ n) : (Ico n m).map (λ x, x - k) = Ico (n - k) (m - k) :=
+congr_arg coe $ list.Ico.map_sub _ _ _ h
+
 theorem zero_bot (n : ℕ) : Ico 0 n = range n :=
 congr_arg coe $ list.Ico.zero_bot _
 
@@ -2992,6 +3001,13 @@ iff.trans (coe_eq_zero _) list.Ico.eq_empty_iff
 lemma add_consecutive {n m l : ℕ} (hnm : n ≤ m) (hml : m ≤ l) :
   Ico n m + Ico m l = Ico n l :=
 congr_arg coe $ list.Ico.append_consecutive hnm hml
+
+@[simp] lemma inter_consecutive (n m l : ℕ) : Ico n m ∩ Ico m l = 0 :=
+begin
+rw [Ico, Ico, coe_inter],
+  convert (congr_arg coe $ list.Ico.inter_consecutive n m l),
+  refl,
+end
 
 @[simp] theorem succ_singleton {n : ℕ} : Ico n (n+1) = {n} :=
 congr_arg coe $ list.Ico.succ_singleton

@@ -34,6 +34,9 @@ by rw [← sub_one, nat.sub_sub, one_add]; refl
 
 lemma pred_eq_sub_one (n : ℕ) : pred n = n - 1 := rfl
 
+lemma sub_sub_sub_cancel_right {a b c : ℕ} (h₂ : c ≤ b) : (a - c) - (b - c) = a - b :=
+by rw [nat.sub_sub, ←nat.add_sub_assoc h₂, nat.add_sub_cancel_left]
+
 theorem pos_iff_ne_zero : n > 0 ↔ n ≠ 0 :=
 ⟨ne_of_gt, nat.pos_of_ne_zero⟩
 
@@ -861,7 +864,7 @@ lemma with_bot.add_eq_one_iff : ∀ {n m : with_bot ℕ}, n + m = 1 ↔ (n = 0 �
 
 -- induction
 
-@[elab_as_eliminator] lemma le_induction {P : nat → Prop} {m} (h0 : P m) (h1 : ∀ n ≥ m, P n → P (n + 1)) : 
+@[elab_as_eliminator] lemma le_induction {P : nat → Prop} {m} (h0 : P m) (h1 : ∀ n ≥ m, P n → P (n + 1)) :
   ∀ n ≥ m, P n :=
 by apply nat.less_than_or_equal.rec h0; exact h1
 

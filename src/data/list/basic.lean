@@ -3164,6 +3164,9 @@ mem_filter_of_mem
 @[simp] theorem mem_inter {a : α} {l₁ l₂ : list α} : a ∈ l₁ ∩ l₂ ↔ a ∈ l₁ ∧ a ∈ l₂ :=
 mem_filter
 
+@[simp] theorem count_inter {a : α} {l₁ l₂ : list α} : count a (l₁ ∩ l₂) = min (count a l₁) (count a l₂) :=
+sorry
+
 theorem inter_subset_left (l₁ l₂ : list α) : l₁ ∩ l₂ ⊆ l₁ :=
 filter_subset _
 
@@ -3911,6 +3914,15 @@ theorem map_add_range' (a) : ∀ s n : ℕ, map ((+) a) (range' s n) = range' (a
 | s 0     := rfl
 | s (n+1) := congr_arg (cons _) (map_add_range' (s+1) n)
 
+theorem map_sub_range' (a) : ∀ (s n : ℕ) (h : a ≤ s), map (λ x, x - a) (range' s n) = range' (s - a) n
+| s 0     _ := rfl
+| s (n+1) h :=
+begin
+  convert congr_arg (cons (s-a)) (map_sub_range' (s+1) n (nat.le_succ_of_le h)),
+  rw nat.succ_sub h,
+  refl,
+end
+
 theorem chain_succ_range' : ∀ s n : ℕ, chain (λ a b, b = succ a) s (range' (s+1) n)
 | s 0     := chain.nil
 | s (n+1) := (chain_succ_range' (s+1) n).cons rfl
@@ -4018,9 +4030,6 @@ def Ico (n m : ℕ) : list ℕ := range' n (m - n)
 
 namespace Ico
 
-theorem map_add (n m k : ℕ) : (Ico n m).map ((+) k) = Ico (n + k) (m + k) :=
-by rw [Ico, Ico, map_add_range', nat.add_sub_add_right, add_comm n k]
-
 theorem zero_bot (n : ℕ) : Ico 0 n = range n :=
 by rw [Ico, nat.sub_zero, range_eq_range']
 
@@ -4047,6 +4056,21 @@ end
 theorem eq_nil_of_le {n m : ℕ} (h : m ≤ n) : Ico n m = [] :=
 by simp [Ico, nat.sub_eq_zero_of_le h]
 
+theorem map_add (n m k : ℕ) : (Ico n m).map ((+) k) = Ico (n + k) (m + k) :=
+by rw [Ico, Ico, map_add_range', nat.add_sub_add_right, add_comm n k]
+
+theorem map_sub (n m k : ℕ) (h₁ : k ≤ n): (Ico n m).map (λ x, x - k) = Ico (n - k) (m - k) :=
+begin
+  by_cases h₂ : n < m,
+  { rw [Ico, Ico],
+    rw nat.sub_sub_sub_cancel_right h₁,
+    rw [map_sub_range' _ _ _ h₁] },
+  { simp at h₂,
+    rw [eq_nil_of_le h₂],
+    rw [eq_nil_of_le (nat.sub_le_sub_right h₂ _)],
+    refl }
+end
+
 @[simp] theorem self_empty {n : ℕ} : Ico n n = [] :=
 eq_nil_of_le (le_refl n)
 
@@ -4060,6 +4084,16 @@ begin
   convert range'_append _ _ _,
   { exact (nat.add_sub_of_le hnm).symm },
   { rwa [← nat.add_sub_assoc hnm, nat.sub_add_cancel] }
+end
+
+@[simp] lemma inter_consecutive (n m l : ℕ) : Ico n m ∩ Ico m l = [] :=
+begin
+  apply eq_nil_iff_forall_not_mem.2,
+  intro a,
+  simp,
+  intros h₁ h₂ h₃,
+  exfalso,
+  exact not_lt_of_ge h₃ h₂
 end
 
 @[simp] theorem succ_singleton {n : ℕ} : Ico n (n+1) = [n] :=

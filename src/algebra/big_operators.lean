@@ -313,41 +313,31 @@ lemma prod_filter [decidable_eq α] [comm_monoid β]
   s.prod f = (s.filter P).prod f * (s.filter (λ a, ¬ P a)).prod f :=
 by rw [← finset.prod_union (finset.filter_inter_filter_neg_eq s), finset.filter_union_filter_neg_eq]
 
--- TODO These next few should probably also be proved without the assumption of commutativity.
 @[to_additive finset.Ico_sum_split]
 lemma Ico_prod_split (l n m : ℕ) (h₁ : n ≤ l) (h₂ : l ≤ m) (f : ℕ → β) :
   (Ico n m).prod f = (Ico n l).prod f * (Ico l m).prod f :=
 begin
-  rw prod_filter (Ico n m) f (λ x, x < l),
-  rw filter_not,
+  rw ← Ico.union_consecutive h₁ h₂,
+  rw prod_union,
   simp,
-  rw min_eq_right h₂,
-  rw max_eq_right h₁,
 end
 
 -- `to_additive` chokes on this one, so we reprove it below
 lemma Ico_prod_split_first (n m : ℕ) (h : n < m) (f : ℕ → β) :
 (Ico n m).prod f = f n * (Ico (n+1) m).prod f :=
 begin
-  rw Ico_prod_split (n+1),
-  -- and tidy up loose ends:
-  simp,
-  -- sad that `linarith` can't solve these last two
-  exact nat.le_succ _,
-  exact nat.succ_le_of_lt h,
+  rw Ico.eq_cons h,
+  rw prod_insert,
+  simp, intros,
 end
 
 lemma Ico_prod_split_last (n m : ℕ) (h : m > n) (f : ℕ → β) :
   (Ico n m).prod f = (Ico n (m-1)).prod f * f (m-1) :=
 begin
-  rw Ico_prod_split (m-1),
-  rw finset.Ico.pred_singleton,
-  -- and tidy up loose ends:
+  rw Ico.succ_top' h,
+  rw prod_insert,
+  rw mul_comm,
   simp,
-  exact nat.lt_of_le_of_lt (nat.zero_le _) h,
-  -- sad that `linarith` can't solve these last two
-  exact nat.pred_le_pred (nat.succ_le_of_lt h),
-  exact nat.sub_le _ _,
 end
 
 local attribute [-simp] add_comm
