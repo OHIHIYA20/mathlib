@@ -43,6 +43,10 @@ lt_of_le_of_lt (nat.zero_le _) h
 lemma le_pred_of_lt {n m : ℕ} (h : m < n) : m ≤ n - 1 :=
 nat.sub_le_sub_right h 1
 
+/-- This ensures that `simp` succeeds on `pred (n + 1) = n`. -/
+@[simp] lemma nat.pred_one_add (n : ℕ) : pred (1 + n) = n :=
+by rw [add_comm, add_one, pred_succ]
+
 theorem pos_iff_ne_zero : n > 0 ↔ n ≠ 0 :=
 ⟨ne_of_gt, nat.pos_of_ne_zero⟩
 

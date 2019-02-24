@@ -2734,11 +2734,6 @@ theorem map_foldl_erase [decidable_eq β] {f : α → β} (finj : injective f) {
 by induction l₂ generalizing l₁; [refl,
 simp only [foldl_cons, map_erase finj, *]]
 
--- TODO move
-/-- This ensures that `simp` succeeds on `pred (n + 1) = n`. -/
-@[simp] lemma nat.pred_one_add (n : ℕ) : pred (1 + n) = n :=
-by rw [add_comm, add_one, pred_succ]
-
 @[simp] theorem count_erase_self (a : α) : ∀ (s : list α), count a (list.erase s a) = pred (count a s)
 | [] := by simp
 | (h :: t) :=
