@@ -3298,6 +3298,14 @@ theorem bag_inter_sublist_left : ∀ l₁ l₂ : list α, l₁.bag_inter l₂ <+
   { apply sublist_cons_of_sublist, apply bag_inter_sublist_left }
 end
 
+theorem bag_inter_nil_iff_inter_nil : ∀ l₁ l₂ : list α, l₁.bag_inter l₂ = [] ↔ l₁ ∩ l₂ = []
+| []      l₂ := by simp
+| (b::l₁) l₂ :=
+begin
+  by_cases h : b ∈ l₂; simp [h],
+  exact bag_inter_nil_iff_inter_nil l₁ l₂
+end
+
 end bag_inter
 
 /- pairwise relation (generalized no duplicate) -/
@@ -4162,14 +4170,7 @@ begin
 end
 
 @[simp] lemma bag_inter_consecutive (n m l : ℕ) : list.bag_inter (Ico n m) (Ico m l) = [] :=
-begin
-  apply eq_nil_iff_forall_not_mem.2,
-  intro a,
-  simp only [and_imp, not_and, not_lt, list.mem_bag_inter, list.Ico.mem],
-  intros h₁ h₂ h₃,
-  exfalso,
-  exact not_lt_of_ge h₃ h₂
-end
+(bag_inter_nil_iff_inter_nil _ _).2 (inter_consecutive n m l)
 
 @[simp] theorem succ_singleton {n : ℕ} : Ico n (n+1) = [n] :=
 by dsimp [Ico]; simp [nat.add_sub_cancel_left]
