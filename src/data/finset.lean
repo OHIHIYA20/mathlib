@@ -1691,10 +1691,6 @@ begin
   refl,
 end
 
-theorem map_add (n m k : ℕ) : (Ico n m).map ⟨(+) k, _⟩ = Ico (n + k) (m + k) :=
-by simp [image, multiset.Ico.map_add]
-
-
 theorem zero_bot (n : ℕ) : Ico 0 n = range n :=
 eq_of_veq $ multiset.Ico.zero_bot _
 
