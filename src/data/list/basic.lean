@@ -3235,7 +3235,7 @@ begin
   simp only [erase_of_not_mem h, list.bag_inter, if_neg h]
 end
 
-theorem mem_bag_inter {a : α} : ∀ {l₁ l₂ : list α}, a ∈ l₁.bag_inter l₂ ↔ a ∈ l₁ ∧ a ∈ l₂
+@[simp] theorem mem_bag_inter {a : α} : ∀ {l₁ l₂ : list α}, a ∈ l₁.bag_inter l₂ ↔ a ∈ l₁ ∧ a ∈ l₂
 | []      l₂ := by simp only [nil_bag_inter, not_mem_nil, false_and]
 | (b::l₁) l₂ := begin
     by_cases b ∈ l₂,
@@ -4155,7 +4155,17 @@ end
 begin
   apply eq_nil_iff_forall_not_mem.2,
   intro a,
-  simp,
+  simp only [and_imp, not_and, not_lt, list.mem_inter, list.Ico.mem],
+  intros h₁ h₂ h₃,
+  exfalso,
+  exact not_lt_of_ge h₃ h₂
+end
+
+@[simp] lemma bag_inter_consecutive (n m l : ℕ) : list.bag_inter (Ico n m) (Ico m l) = [] :=
+begin
+  apply eq_nil_iff_forall_not_mem.2,
+  intro a,
+  simp only [and_imp, not_and, not_lt, list.mem_bag_inter, list.Ico.mem],
   intros h₁ h₂ h₃,
   exfalso,
   exact not_lt_of_ge h₃ h₂

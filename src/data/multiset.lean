@@ -3000,11 +3000,7 @@ lemma add_consecutive {n m l : ℕ} (hnm : n ≤ m) (hml : m ≤ l) :
 congr_arg coe $ list.Ico.append_consecutive hnm hml
 
 @[simp] lemma inter_consecutive (n m l : ℕ) : Ico n m ∩ Ico m l = 0 :=
-begin
-rw [Ico, Ico, coe_inter],
-  convert (congr_arg coe $ list.Ico.inter_consecutive n m l),
-  refl,
-end
+congr_arg coe $ list.Ico.bag_inter_consecutive n m l
 
 @[simp] theorem succ_singleton {n : ℕ} : Ico n (n+1) = {n} :=
 congr_arg coe $ list.Ico.succ_singleton
