@@ -342,16 +342,14 @@ begin
   simp,
 end
 
-local attribute [-simp] add_comm
-local attribute [simp] nat.add_sub_cancel nat.add_sub_cancel_left
-
 @[to_additive finset.Ico_sum_reindex_right]
 lemma Ico_prod_reindex_right (k n m : ℕ) (f : ℕ → β) :
   (Ico n m).prod f = (Ico (n+k) (m+k)).prod (λ x, f (x - k)) :=
 begin
   rw ←Ico.image_add,
   have inj : ∀ (x : ℕ), x ∈ Ico n m → ∀ (y : ℕ), y ∈ Ico n m → k + x = k + y → x = y,
-  { intros x mx y my h,
+  { -- TODO this should be much easier
+    intros x mx y my h,
     rw add_comm at h,
     conv at h { to_rhs, rw add_comm },
     replace h := congr_arg (λ x, x - k) h,
@@ -362,6 +360,8 @@ begin
   rw prod_image inj,
   simp,
 end.
+
+local attribute [-simp] add_comm
 
 @[to_additive finset.Ico_sum_reindex_left]
 lemma Ico_prod_reindex_left (k n m : ℕ) (h : k ≤ n) (f : ℕ → β) :
