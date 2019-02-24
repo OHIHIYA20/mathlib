@@ -1726,18 +1726,10 @@ eq_of_veq $ multiset.Ico.succ_singleton
 theorem succ_top {n m : ℕ} (h : n ≤ m) : Ico n (m + 1) = insert m (Ico n m) :=
 by rw [← to_finset, multiset.Ico.succ_top h, multiset.to_finset_cons, to_finset]
 
--- TODO move these to appropriate homes?
-lemma nat.ge_one_of_gt {n m : ℕ} (h : m > n) : m ≥ 1 :=
-le_trans ((le_add_iff_nonneg_left _).2 (nat.zero_le _)) h
-
-lemma nat.le_pred_of_lt {n m : ℕ} (h : m < n) : m ≤ n - 1 := nat.sub_le_sub_right h 1
-
--- TODO what should this be called?
-theorem succ_top' {n m : ℕ} (h : n < m) : Ico n m = insert (m-1) (Ico n (m-1)) :=
+theorem succ_top' {n m : ℕ} (h : n < m) : Ico n m = insert (m - 1) (Ico n (m - 1)) :=
 begin
-  have w : m = m - 1 + 1,
-    { rw [nat.add_comm, nat.add_sub_cancel'], exact nat.ge_one_of_gt h },
-  conv {to_lhs, rw w},
+  have w : m = m - 1 + 1 := (nat.sub_add_cancel (nat.one_le_of_lt h)).symm,
+  conv { to_lhs, rw w },
   rw succ_top,
   exact nat.le_pred_of_lt h
 end
