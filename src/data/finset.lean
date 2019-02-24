@@ -1691,6 +1691,10 @@ begin
   refl,
 end
 
+theorem map_add (n m k : ℕ) : (Ico n m).map ⟨(+) k, _⟩ = Ico (n + k) (m + k) :=
+by simp [image, multiset.Ico.map_add]
+
+
 theorem zero_bot (n : ℕ) : Ico 0 n = range n :=
 eq_of_veq $ multiset.Ico.zero_bot _
 
@@ -1726,9 +1730,21 @@ eq_of_veq $ multiset.Ico.succ_singleton
 theorem succ_top {n m : ℕ} (h : n ≤ m) : Ico n (m + 1) = insert m (Ico n m) :=
 by rw [← to_finset, multiset.Ico.succ_top h, multiset.to_finset_cons, to_finset]
 
+-- TODO move these to appropriate homes?
+lemma nat.ge_one_of_gt {n m : ℕ} (h : m > n) : m ≥ 1 :=
+le_trans ((le_add_iff_nonneg_left _).2 (nat.zero_le _)) h
+
+lemma nat.le_pred_of_lt {n m : ℕ} (h : m < n) : m ≤ n - 1 := nat.sub_le_sub_right h 1
+
 -- TODO what should this be called?
 theorem succ_top' {n m : ℕ} (h : n < m) : Ico n m = insert (m-1) (Ico n (m-1)) :=
-sorry
+begin
+  have w : m = m - 1 + 1,
+    { rw [nat.add_comm, nat.add_sub_cancel'], exact nat.ge_one_of_gt h },
+  conv {to_lhs, rw w},
+  rw succ_top,
+  exact nat.le_pred_of_lt h
+end
 
 theorem eq_cons {n m : ℕ} (h : n < m) : Ico n m = insert n (Ico (n + 1) m) :=
 by rw [← to_finset, multiset.Ico.eq_cons h, multiset.to_finset_cons, to_finset]

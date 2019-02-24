@@ -2734,6 +2734,32 @@ theorem map_foldl_erase [decidable_eq β] {f : α → β} (finj : injective f) {
 by induction l₂ generalizing l₁; [refl,
 simp only [foldl_cons, map_erase finj, *]]
 
+-- TODO move
+/-- This ensures that `simp` succeeds on `pred (n + 1) = n`. -/
+@[simp] lemma nat.pred_one_add (n : ℕ) : pred (1 + n) = n :=
+by rw [add_comm, add_one, pred_succ]
+
+@[simp] theorem count_erase_self (a : α) : ∀ (s : list α), count a (list.erase s a) = pred (count a s)
+| [] := by simp
+| (h :: t) :=
+begin
+  rw erase_cons,
+  by_cases p : h = a,
+  { rw [if_pos p, count_cons', if_pos p.symm], simp },
+  { rw [if_neg p, count_cons', count_cons', if_neg (λ x : a = h, p x.symm), count_erase_self],
+    simp, }
+end
+
+@[simp] theorem count_erase_of_ne {a b : α} (ab : a ≠ b) : ∀ (s : list α), count a (list.erase s b) = count a s
+| [] := by simp
+| (x :: xs) :=
+begin
+  rw erase_cons,
+  split_ifs with h,
+  { rw [count_cons', h, if_neg ab], simp },
+  { rw [count_cons', count_cons', count_erase_of_ne] }
+end
+
 end erase
 
 /- diff -/
@@ -3164,9 +3190,6 @@ mem_filter_of_mem
 @[simp] theorem mem_inter {a : α} {l₁ l₂ : list α} : a ∈ l₁ ∩ l₂ ↔ a ∈ l₁ ∧ a ∈ l₂ :=
 mem_filter
 
-@[simp] theorem count_inter {a : α} {l₁ l₂ : list α} : count a (l₁ ∩ l₂) = min (count a l₁) (count a l₂) :=
-sorry
-
 theorem inter_subset_left (l₁ l₂ : list α) : l₁ ∩ l₂ ⊆ l₁ :=
 filter_subset _
 
@@ -3224,6 +3247,48 @@ theorem mem_bag_inter {a : α} : ∀ {l₁ l₂ : list α}, a ∈ l₁.bag_inter
       symmetry, apply or_iff_right_of_imp,
       rintro ⟨rfl, h'⟩, exact h.elim h' }
   end
+
+@[simp] theorem count_bag_inter {a : α} :
+  ∀ {l₁ l₂ : list α}, count a (l₁.bag_inter l₂) = min (count a l₁) (count a l₂)
+| []         l₂ := by simp
+| l₁         [] := by simp
+| (h₁ :: l₁) (h₂ :: l₂) :=
+begin
+  dsimp [list.bag_inter],
+  simp,
+  by_cases p₁ : h₁ = h₂,
+  { simp [p₁],
+    repeat { rw count_cons' },
+    by_cases p₂ : h₂ = a,
+    { simp *,
+      rw min_add_add_left, },
+    { simp *,
+      rw if_neg (λ x : a = h₂, p₂ (x.symm)), -- TODO this must have a name?!
+      simp, } },
+  { simp *,
+    split_ifs,
+    { rw list.erase_cons,
+      rw if_neg (λ x : h₂ = h₁, p₁ (x.symm)), -- TODO similarly here
+      repeat { rw count_cons' },
+      rw count_bag_inter,
+      repeat { rw count_cons' },
+      split_ifs with p₂ p₃ p₃,
+      { exfalso, exact p₁ (eq.trans p₃.symm p₂), },
+      { simp, rw count_erase_of_ne p₃, },
+      { rw [←p₃, count_erase_self],
+        simp only [nat.add_zero],
+        rw ←min_add_add_right,
+        conv {to_lhs, congr, skip, rw [add_one] },
+        rw nat.succ_pred_eq_of_pos,
+        subst p₃,
+        exact count_pos.2 h },
+      { simp, rw count_erase_of_ne p₃, } },
+    { rw count_bag_inter,
+      by_cases p₂ : a = h₁,
+      { rw [p₂, count_cons', if_neg p₁, count_eq_zero_of_not_mem h],
+        simp },
+      { conv {to_rhs, rw [count_cons', if_neg p₂], simp } } } }
+end
 
 theorem bag_inter_sublist_left : ∀ l₁ l₂ : list α, l₁.bag_inter l₂ <+ l₁
 | []      l₂ := by simp [nil_sublist]

@@ -326,17 +326,19 @@ end
 lemma Ico_prod_split_first (n m : ℕ) (h : n < m) (f : ℕ → β) :
   (Ico n m).prod f = f n * (Ico (n+1) m).prod f :=
 begin
-  rw Ico.eq_cons h,
-  rw prod_insert,
-  simp, intros,
+  rw [Ico.eq_cons h, prod_insert],
+  rw Ico.mem,
+  simp,
+  intros,
+  exfalso,
+  exact nat.not_succ_le_self n a,
 end
 
+-- `to_additive` chokes on this one, so we reprove it below
 lemma Ico_prod_split_last (n m : ℕ) (h : m > n) (f : ℕ → β) :
   (Ico n m).prod f = (Ico n (m-1)).prod f * f (m-1) :=
 begin
-  rw Ico.succ_top' h,
-  rw prod_insert,
-  rw mul_comm,
+  rw [Ico.succ_top' h, prod_insert, mul_comm],
   simp,
 end
 
@@ -347,52 +349,46 @@ local attribute [simp] nat.add_sub_cancel nat.add_sub_cancel_left
 lemma Ico_prod_reindex_right (k n m : ℕ) (f : ℕ → β) :
   (Ico n m).prod f = (Ico (n+k) (m+k)).prod (λ x, f (x - k)) :=
 begin
-  apply prod_bij (λ a ∈ Ico n m, a + k),
-  { intros a ha, dsimp at *, simp at *, assumption },
-  { intros a ha, dsimp at *, simp at * },
-  { intros a₁ a₂ ha₁ ha₂ a, dsimp at *, simp at *, assumption },
-  { intros,
-    use b - k,
-    fsplit,
-    { simp at *, cases H, fsplit,
-      { exact nat.le_sub_right_of_add_le H_left },
-      have h : k ≤ b := nat.le_trans (nat.le_add_left _ _) H_left,
-      rw ←nat.sub_lt_sub_right_iff h at H_right,
-      simp at H_right,
-      exact H_right },
-    dsimp,
-    simp at *,
-    have h : k ≤ b,
-    { cases H, transitivity k + n, apply nat.le_add_right, simp [add_comm] at H_left, assumption },
-    simp [add_comm],
-    rw nat.add_sub_of_le h, }
+  rw ←Ico.image_add,
+  have inj : ∀ (x : ℕ), x ∈ Ico n m → ∀ (y : ℕ), y ∈ Ico n m → k + x = k + y → x = y,
+  { intros x mx y my h,
+    rw add_comm at h,
+    conv at h { to_rhs, rw add_comm },
+    replace h := congr_arg (λ x, x - k) h,
+    dsimp at h,
+    rw nat.add_sub_cancel at h,
+    rw nat.add_sub_cancel at h,
+    exact h },
+  rw prod_image inj,
+  simp,
 end.
 
 @[to_additive finset.Ico_sum_reindex_left]
 lemma Ico_prod_reindex_left (k n m : ℕ) (h : k ≤ n) (f : ℕ → β) :
   (Ico n m).prod f = (Ico (n-k) (m-k)).prod (λ x, f (x + k)) :=
 begin
-  apply prod_bij (λ a ∈ Ico n m, a - k),
-  { intros a ha, dsimp at *, simp at *, cases ha, fsplit,
-    apply nat.sub_le_sub_right ha_left,
-    have h : k ≤ a := nat.le_trans h ha_left,
-    apply (nat.sub_lt_sub_right_iff h).mpr ha_right, },
-  { intros a ha, dsimp at *, simp at *, cases ha,
-    have h : k ≤ a := nat.le_trans h ha_left,
-    rw nat.sub_add_cancel h, },
-  { intros a₁ a₂ ha₁ ha₂ a, dsimp at *, simp at *, cases ha₂, cases ha₁,
-    convert (congr_arg (λ x, x + k) a),
-    exact (nat.sub_add_cancel (nat.le_trans h ha₁_left)).symm,
-    exact (nat.sub_add_cancel (nat.le_trans h ha₂_left)).symm, },
-  { intros,
-    existsi b + k,
-    dsimp at *, simp at *, cases H, fsplit,
-    { convert nat.add_le_add_right H_left k,
-      exact (nat.sub_add_cancel h).symm },
-    convert nat.add_lt_add_right H_right k,
-    have h'' := nat.add_lt_of_lt_sub_right H_right,
-    have h' : k < m := lt_of_le_of_lt (nat.le_add_left k b) h'',
-    exact (nat.sub_add_cancel (le_of_lt h')).symm, }
+  rw ←Ico.image_sub _ _ _ h,
+  have inj : ∀ (x : ℕ), x ∈ Ico n m → ∀ (y : ℕ), y ∈ Ico n m → x - k = y - k → x = y,
+  { intros x mx y my w,
+    simp at mx,
+    have xh : x ≥ k := le_trans h mx.left,
+    clear mx,
+    simp at my,
+    have yh : y ≥ k := le_trans h my.left,
+    clear my,
+    replace h := congr_arg (λ x, x + k) w,
+    dsimp at h,
+    rw nat.sub_add_cancel xh at h,
+    rw nat.sub_add_cancel yh at h,
+    exact h },
+  rw prod_image inj,
+  simp,
+  refine finset.prod_congr rfl (assume a ha, _),
+  congr,
+  simp at ha,
+  cases ha,
+  have p : k ≤ a := le_trans h ha_left,
+  rw nat.sub_add_cancel p,
 end
 
 end comm_monoid
