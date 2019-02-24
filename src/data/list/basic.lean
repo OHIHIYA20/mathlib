@@ -3258,12 +3258,12 @@ begin
     { simp *,
       rw min_add_add_left, },
     { simp *,
-      rw if_neg (λ x : a = h₂, p₂ (x.symm)), -- TODO this must have a name?!
+      rw if_neg (ne.symm p₂),
       simp, } },
   { simp *,
     split_ifs,
     { rw list.erase_cons,
-      rw if_neg (λ x : h₂ = h₁, p₁ (x.symm)), -- TODO similarly here
+      rw if_neg (ne.symm p₁),
       repeat { rw count_cons' },
       rw count_bag_inter,
       repeat { rw count_cons' },
