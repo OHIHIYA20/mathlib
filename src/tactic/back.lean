@@ -21,17 +21,18 @@ resulting goals cannot all be discharged.",
 private meta def is_lemma_applicable (lem : expr) : tactic bool := return true
 
 meta structure back_lemma :=
-(lem : expr)
+(lem       : expr)
 (finishing : bool)
 
 meta structure back_state :=
-(steps : ℕ := 0)
-(limit : option ℕ)
-(lemmas : list back_lemma) -- later we may update this as we go (removing or reordering)
-(stashed : list expr := {})   -- Stores goals which we're going to return to the user.
-(committed : list expr := {}) -- Stores goals which we must complete.
-(in_progress : list expr)     -- Stores goals which we're still working on.
+(steps       : ℕ := 0)
+(limit       : option ℕ)
+(lemmas      : list back_lemma) -- We carry the lemmas along, as we may want to reorder or discard some.
+(stashed     : list expr := {}) -- Stores goals which we're going to return to the user.
+(committed   : list expr := {}) -- Stores goals which we must complete.
+(in_progress : list expr)       -- Stores goals which we're still working on.
 
+-- Count the number of arguments not determined by later arguments.
 meta def count_arrows : expr → ℕ
 | (expr.pi n bi d b) :=
    if b.has_var_idx 0 then count_arrows b
@@ -39,19 +40,23 @@ meta def count_arrows : expr → ℕ
 | `(%%a <-> %%b) := 1 + min (count_arrows a) (count_arrows b)
 | _ := 0
 
+/-- Sorts a list of lemmas according to the number of explicit arguments
+    (more precisely, arguments which are not determined by later arguments). -/
 meta def sort_by_arrows (L : list back_lemma) : tactic (list back_lemma) :=
 do M ← L.mmap (λ e, do c ← count_arrows <$> infer_type e.lem, return (c, e)),
    return ((list.qsort (λ (p q : ℕ × back_lemma), p.1 ≤ q.1) M).map (λ p, p.2))
 
 meta def back_state.init (progress finishing : list expr) (limit : option ℕ): tactic back_state :=
 do g :: _ ← get_goals,
+   -- We sort the lemmas, preferring lemmas which, when applied, will produce fewer new goals.
    lemmas ← sort_by_arrows $ (finishing.map (λ e, ⟨e, tt⟩)) ++
                              (progress.map  (λ e, ⟨e, ff⟩)),
    return
-   { limit := limit,
-     lemmas := lemmas,
+   { limit       := limit,
+     lemmas      := lemmas,
      in_progress := [g] }
 
+-- keep only uninstantiable metavariables
 meta def filter_mvars (L : list expr) : tactic (list expr) :=
 (list.filter (λ e, e.is_meta_var)) <$> (L.mmap (λ e, instantiate_mvars e))
 
@@ -67,18 +72,18 @@ do let s := (list.repeat ' ' n).as_string,
 * and remove applied iffs.
 -/
 meta def back_state.clean (s : back_state) (index : ℕ) (last_lemma : expr): tactic back_state :=
-do stashed ← filter_mvars s.stashed,
-   committed ← filter_mvars s.committed,
+do stashed     ← filter_mvars s.stashed,
+   committed   ← filter_mvars s.committed,
    in_progress ← filter_mvars s.in_progress,
    -- We don't apply `iff` lemmas more than once.
    lemmas ← (iff_mp last_lemma >> pure (s.lemmas.remove_nth index))
             <|> pure s.lemmas,
    return
-   { steps := s.steps + 1,
-     stashed := stashed,
-     committed := committed,
+   { steps       := s.steps + 1,
+     stashed     := stashed,
+     committed   := committed,
      in_progress := in_progress,
-     lemmas := lemmas,
+     lemmas      := lemmas,
      .. s}
 
 meta def back_state.apply (s : back_state) (index : ℕ) (e : expr) (committed : bool) : tactic back_state :=
@@ -214,10 +219,10 @@ do (extra_pr_lemmas, extra_fi_lemmas, gex, hex, all_hyps) ← decode_back_arg_li
    with_fi_lemmas ← (list.join <$> use_fi.mmap attribute.get_instances) >>= list.mmap mk_const,
    with_pr_lemmas ← (list.join <$> use_pr.mmap attribute.get_instances) >>= list.mmap mk_const,
 
-   -- If the goal is not propositional, we do not include the local context unless specifically
-   -- included via `[*]`.
-   prop ← option.is_some <$> try_core propositional_goal,
-   hypotheses ← list.filter (λ h : expr, h.local_uniq_name ∉ hex) <$>  -- remove local exceptions
+   -- If the goal is not propositional, we do not include the non-propositional local hypotheses,
+   -- unless specifically included via `[*]`.
+   prop ← succeeds propositional_goal,
+   hypotheses ← list.filter (λ h : expr, h.local_uniq_name ∉ hex) <$>  -- remove explicitly removed hypotheses
    if (¬no_dflt ∧ prop) ∨ all_hyps then
      local_context
    else if no_dflt then
@@ -240,24 +245,24 @@ open interactive interactive.types expr
 `back` performs backwards reasoning, recursively applying lemmas against the goal.
 
 Lemmas can be specified via an optional argument, e.g. as `back [foo, bar]`. Every lemma
-tagged with an attribute `qux` may be included using `back using qux`.
+tagged with an attribute `qux` may be included using the syntax `back using qux`.
 Additionally, `back` always includes any lemmas tagged with the attribute `@[back]`,
 and all local propositional hypotheses.
 
 (If the goal is a proposition, `back` is more aggressive and includes all hypotheses. This
-can be achieved in other cases using using `back [*]`.)
+can be achieved in other cases using `back [*]`.)
 
 Lemmas which were included because of the `@[back]` attribute, or local hypotheses,
 can be excluded using the notation `back [-h]`.
 
-Further, lemmas can be tagged with the `@[back!]` attribute, or appear in the list with
+Further, lemmas can be tagged with the `@[back!]` attribute, or appear in the arguments with
 a leading `!`, e.g. as `back [!foo]` or `back using !qux`. The tactic `back` will return
 successfully if it either discharges the goal, or applies at least one `!` lemma.
-(More precisely, `back` will apply a non-empty and maximal collection of the lemmas,
+(More precisely, `back` will apply some non-empty and maximal collection of the lemmas,
 subject to the condition that if any lemma not marked with `!` is applied, all resulting
 subgoals are later dischargeed.)
 
-Finally, the search depth can be controlled e.g. as `back 5`. The default value is 100.
+Finally, the search depth can be controlled, e.g. as `back 5`. The default value is 100.
 
 `back?` will print a trace message showing the term it constructed. (Possibly with placeholders,
 for use with `refine`.)
