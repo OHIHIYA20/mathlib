@@ -121,8 +121,26 @@ do apply_thorough e.lem,
 meta def back_state.children (s : back_state) : tactic (list back_state) :=
 sorry
 
+
+instance : has_le (ℕ × ℕ × ℕ) :=
+{ le := λ a b, true } -- FIXME
+
+private meta def insert_new_state : back_state → list back_state → list back_state
+/- depth first search: -/
+-- | s states := s :: states
+/- complexity ordered search -/
+| s (h :: t) := if s.complexity ≤ h.complexity then
+                  s :: h :: t
+                else
+                  h :: (insert_new_state s t)
+| s [] := [s]
+
+private meta def insert_new_states : list back_state → list back_state → list back_state
+| [] states := states
+| (h :: t) states := insert_new_states t (insert_new_state h states)
+
 -- Either return a completed back_state, or an updated list.
-private meta def run_one_step : list back_state →  tactic (back_state ⊕ (list back_state))
+private meta def run_one_step : list back_state → tactic (back_state ⊕ (list back_state))
 | [] := failed
 | (h :: t) := sorry
 
