@@ -23,14 +23,29 @@ private meta def is_lemma_applicable (lem : expr) : tactic bool := return true
 meta structure back_lemma :=
 (lem       : expr)
 (finishing : bool)
+(index     : ℕ)
+
+-- We fake an instance here for convenience. Correctness is ensured by creating unique index values.
+meta instance : decidable_eq back_lemma :=
+λ a b, if a.index = b.index then is_true undefined else is_false undefined
+
+-- An expr representing a goal, along with a list of lemmas which we have not yet tried
+-- `apply`ing against that goal.
+meta structure apply_state :=
+(goal   : expr)
+(lemmas : list back_lemma)
 
 meta structure back_state :=
 (steps       : ℕ := 0)
 (limit       : option ℕ)
 (lemmas      : list back_lemma) -- We carry the lemmas along, as we may want to reorder or discard some.
 (stashed     : list expr := {}) -- Stores goals which we're going to return to the user.
-(committed   : list expr := {}) -- Stores goals which we must complete.
-(in_progress : list expr)       -- Stores goals which we're still working on.
+(committed   : list apply_state := {}) -- Stores goals which we must complete.
+(in_progress : list apply_state)       -- Stores goals which we're still working on.
+
+-- TODO Think hard about what goes here; possibly allow customisation.
+meta def back_state.complexity (s : back_state) : ℕ × ℕ × ℕ :=
+(s.committed.length, s.in_progress.length, s.steps)
 
 -- Count the number of arguments not determined by later arguments.
 meta def count_arrows : expr → ℕ
@@ -49,16 +64,19 @@ do M ← L.mmap (λ e, do c ← count_arrows <$> infer_type e.lem, return (c, e)
 meta def back_state.init (progress finishing : list expr) (limit : option ℕ): tactic back_state :=
 do g :: _ ← get_goals,
    -- We sort the lemmas, preferring lemmas which, when applied, will produce fewer new goals.
-   lemmas ← sort_by_arrows $ (finishing.map (λ e, ⟨e, tt⟩)) ++
-                             (progress.map  (λ e, ⟨e, ff⟩)),
+   lemmas ← sort_by_arrows $ (finishing.enum.map (λ e, ⟨e.2, tt, e.1⟩)) ++
+                             (progress.enum.map  (λ e, ⟨e.2, ff, e.1 + finishing.length⟩)),
    return
    { limit       := limit,
      lemmas      := lemmas,
-     in_progress := [g] }
+     in_progress := [⟨g, lemmas⟩] }
 
 -- keep only uninstantiable metavariables
 meta def filter_mvars (L : list expr) : tactic (list expr) :=
 (list.filter (λ e, e.is_meta_var)) <$> (L.mmap (λ e, instantiate_mvars e))
+
+meta def filter_apply_state_mvars (L : list apply_state) : tactic (list apply_state) :=
+(list.filter (λ as, as.goal.is_meta_var)) <$> (L.mmap (λ as, do e' ← instantiate_mvars as.goal, return ⟨e', as.lemmas⟩))
 
 -- TODO remove in cleanup
 meta def pad_trace (n : ℕ) {α : Type} [has_to_tactic_format α] (a : α) : tactic unit :=
@@ -71,12 +89,12 @@ do let s := (list.repeat ' ' n).as_string,
 * increment the `step` counter,
 * and remove applied iffs.
 -/
-meta def back_state.clean (s : back_state) (index : ℕ) (last_lemma : expr): tactic back_state :=
+meta def back_state.clean (s : back_state) (last_lemma : back_lemma) : tactic back_state :=
 do stashed     ← filter_mvars s.stashed,
-   committed   ← filter_mvars s.committed,
-   in_progress ← filter_mvars s.in_progress,
+   committed   ← filter_apply_state_mvars s.committed,
+   in_progress ← filter_apply_state_mvars s.in_progress,
    -- We don't apply `iff` lemmas more than once.
-   lemmas ← (iff_mp last_lemma >> pure (s.lemmas.remove_nth index))
+   lemmas ← (iff_mp last_lemma.lem >> pure (s.lemmas.erase last_lemma))
             <|> pure s.lemmas,
    return
    { steps       := s.steps + 1,
@@ -86,38 +104,55 @@ do stashed     ← filter_mvars s.stashed,
      lemmas      := lemmas,
      .. s}
 
-meta def back_state.apply (s : back_state) (index : ℕ) (e : expr) (committed : bool) : tactic back_state :=
-do apply_thorough e,
+meta def back_state.apply (s : back_state) (e : back_lemma) (committed : bool) : tactic back_state :=
+do apply_thorough e.lem,
    goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
   --  pad_trace s.steps e,
   --  get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
-   s' ← s.clean index e,
+   s' ← s.clean e,
    (done >> return s') <|> do
    gs ← get_goals,
+   let as : list apply_state := gs.map $ λ g, ⟨g, s.lemmas⟩,
    if committed then
-     return { committed := gs ++ s.committed, .. s' }
+     return { committed := as ++ s.committed, .. s' }
    else
-     return { in_progress := gs ++ s.in_progress, .. s' }
+     return { in_progress := as ++ s.in_progress, .. s' }
 
-meta def back_state.run : back_state → tactic back_state
-| s :=
-  do
-  guard (s.steps ≤ s.limit.get_or_else 20),
-  match s.committed with
-  | [] :=
-    -- Let's see if we can do anything with `in_progress` goals
-    match s.in_progress with
-    | [] := return s -- Great, all done!
-    | (p :: ps) :=
-    do set_goals [p],
-      (s.lemmas.enum.any_of $ λ e, { in_progress := ps, .. s }.apply e.1 e.2.1 e.2.2 >>= back_state.run)
-      <|> { in_progress := ps, stashed := p :: s.stashed, .. s }.run
-    end
-  | (c :: cs) :=
-    -- We must discharge `c`.
-    do set_goals [c],
-      s.lemmas.enum.any_of $ λ e, { committed := cs, .. s }.apply e.1 e.2.1 tt >>= back_state.run
-  end
+meta def back_state.children (s : back_state) : tactic (list back_state) :=
+sorry
+
+-- Either return a completed back_state, or an updated list.
+private meta def run_one_step : list back_state →  tactic (back_state ⊕ (list back_state))
+| [] := failed
+| (h :: t) := sorry
+
+private meta def run : list back_state → tactic back_state
+| states :=
+  do r ← run_one_step states,
+     match r with
+     | (sum.inl success) := return success
+     | (sum.inr states) := run states
+     end
+
+-- meta def back_state.run : back_state → tactic back_state
+-- | s :=
+--   do
+--   guard (s.steps ≤ s.limit.get_or_else 20),
+--   match s.committed with
+--   | [] :=
+--     -- Let's see if we can do anything with `in_progress` goals
+--     match s.in_progress with
+--     | [] := return s -- Great, all done!
+--     | (p :: ps) :=
+--     do set_goals [p],
+--       (s.lemmas.enum.any_of $ λ e, { in_progress := ps, .. s }.apply e.1 e.2.1 e.2.2 >>= back_state.run)
+--       <|> { in_progress := ps, stashed := p :: s.stashed, .. s }.run
+--     end
+--   | (c :: cs) :=
+--     -- We must discharge `c`.
+--     do set_goals [c],
+--       s.lemmas.enum.any_of $ λ e, { committed := cs, .. s }.apply e.1 e.2.1 tt >>= back_state.run
+--   end
 
 /-- Takes two sets of lemmas, 'progress' lemmas and 'finishing' lemmas.
 
@@ -128,7 +163,7 @@ meta def back_state.run : back_state → tactic back_state
     -/
 meta def back (progress finishing : list expr) (limit : option ℕ) : tactic unit :=
 do i ← back_state.init progress finishing limit,
-   f ← i.run,
+   f ← run [i],
    set_goals (f.stashed),
    guard (f.steps > 0) -- Make sure some progress was made.
 
