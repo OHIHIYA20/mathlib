@@ -3,6 +3,7 @@
 -- Authors: Scott Morrison, Keeley Hoek
 
 import tactic.basic
+import data.list.basic
 
 namespace tactic
 
@@ -46,6 +47,15 @@ meta structure back_state :=
 -- TODO Think hard about what goes here; possibly allow customisation.
 meta def back_state.complexity (s : back_state) : ℕ × ℕ × ℕ :=
 (s.committed.length, s.in_progress.length, s.steps)
+
+meta def back_state.done (s : back_state) : bool :=
+s.committed.empty ∧ s.in_progress.empty
+
+meta def back_state.add_goal (s : back_state) (committed : bool) (as : apply_state) :=
+if committed then
+  { committed := as :: s.committed .. s }
+else
+  { in_progress := as :: s.in_progress .. s }
 
 -- Count the number of arguments not determined by later arguments.
 meta def count_arrows : expr → ℕ
@@ -104,26 +114,65 @@ do stashed     ← filter_mvars s.stashed,
      lemmas      := lemmas,
      .. s}
 
-meta def back_state.apply (s : back_state) (e : back_lemma) (committed : bool) : tactic back_state :=
+meta def back_state.apply_lemma (s : back_state) (e : back_lemma) (committed : bool) : tactic back_state :=
 do apply_thorough e.lem,
-   goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
+  --  goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
   --  pad_trace s.steps e,
   --  get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
    s' ← s.clean e,
    (done >> return s') <|> do
    gs ← get_goals,
    let as : list apply_state := gs.map $ λ g, ⟨g, s.lemmas⟩,
-   if committed then
+   if e.finishing ∨ committed then
      return { committed := as ++ s.committed, .. s' }
    else
      return { in_progress := as ++ s.in_progress, .. s' }
 
+meta def back_state.apply (s : back_state) (committed : bool) : apply_state → tactic (list back_state)
+| as :=
+  match as.lemmas with
+  | [] := fail "No lemmas applied to the current goal."
+  | (h :: t) := do r ← try_core $ s.apply_lemma h committed,
+                   match r with
+                   | none := back_state.apply ⟨as.goal, t⟩
+                   | (some bs) := return [bs, s.add_goal committed ⟨as.goal, t⟩]
+                   end
+  end
+
 meta def back_state.children (s : back_state) : tactic (list back_state) :=
-sorry
+do
+match s.committed with
+| [] :=
+  -- Let's see if we can do anything with `in_progress` goals
+  match s.in_progress with
+  | [] := undefined
+  | (p :: ps) :=
+  do set_goals [p.goal],
+     s.apply ff p <|>
+     return [{ in_progress := ps, stashed := p.goal :: s.stashed, .. s }]
+  end
+| (c :: cs) :=
+  -- We must discharge `c`.
+  do set_goals [c.goal],
+     s.apply tt c
+end
 
-
-instance : has_le (ℕ × ℕ × ℕ) :=
-{ le := λ a b, true } -- FIXME
+def lexicographic_preorder {α β : Type*} [preorder α] [decidable_eq α] [preorder β] : preorder (α × β) :=
+{ le := λ a b, a.1 < b.1 ∨ (a.1 = b.1 ∧ a.2 ≤ b.2),
+  le_refl := λ a, or.inr ⟨rfl, le_refl _⟩,
+  le_trans := λ a b c h₁ h₂,
+  begin
+    dsimp at *,
+    cases h₁,
+    { left,
+      cases h₂,
+      exact lt_trans h₁ h₂,
+      rwa ←h₂.left },
+    { cases h₂,
+      left, rwa h₁.left,
+      right, split, exact eq.trans h₁.1 h₂.1, exact le_trans h₁.2 h₂.2
+    } end }
+local attribute [instance] lexicographic_preorder
 
 private meta def insert_new_state : back_state → list back_state → list back_state
 /- depth first search: -/
@@ -142,7 +191,13 @@ private meta def insert_new_states : list back_state → list back_state → lis
 -- Either return a completed back_state, or an updated list.
 private meta def run_one_step : list back_state → tactic (back_state ⊕ (list back_state))
 | [] := failed
-| (h :: t) := sorry
+| (h :: t) :=
+  if h.done then
+    return $ sum.inl h
+  else
+    do c ← h.children,
+       return $ sum.inr $ insert_new_states c t
+
 
 private meta def run : list back_state → tactic back_state
 | states :=
