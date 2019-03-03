@@ -30,17 +30,31 @@ meta structure back_lemma :=
 meta instance : decidable_eq back_lemma :=
 λ a b, if a.index = b.index then is_true undefined else is_false undefined
 
+meta structure goal_mvar :=
+(original synthetic : expr)
+
+meta def mk_goal_mvar (g : expr) : tactic goal_mvar :=
+do t ← infer_type g,
+   s ← mk_meta_var t,
+   return ⟨g, s⟩
+
+meta def goal_mvar.new_mvars (g : goal_mvar) : tactic goal_mvar :=
+do t ← infer_type g.original,
+   s ← mk_meta_var t,
+   return ⟨g.original, s⟩
+
 -- An expr representing a goal, along with a list of lemmas which we have not yet tried
 -- `apply`ing against that goal.
 meta structure apply_state :=
-(goal   : expr)
+(goal   : goal_mvar)
 (lemmas : list back_lemma)
 
 meta structure back_state :=
 (steps       : ℕ := 0)
 (limit       : option ℕ)
 (lemmas      : list back_lemma) -- We carry the lemmas along, as we may want to reorder or discard some.
-(stashed     : list expr := {}) -- Stores goals which we're going to return to the user.
+(stashed     : list goal_mvar := {})   -- Stores goals which we're going to return to the user after unification.
+(completed   : list goal_mvar := {})   -- Stores completed goals, which should be unified on success.
 (committed   : list apply_state := {}) -- Stores goals which we must complete.
 (in_progress : list apply_state)       -- Stores goals which we're still working on.
 
@@ -76,17 +90,20 @@ do g :: _ ← get_goals,
    -- We sort the lemmas, preferring lemmas which, when applied, will produce fewer new goals.
    lemmas ← sort_by_arrows $ (finishing.enum.map (λ e, ⟨e.2, tt, e.1⟩)) ++
                              (progress.enum.map  (λ e, ⟨e.2, ff, e.1 + finishing.length⟩)),
+   gmvar ← mk_goal_mvar g,
    return
    { limit       := limit,
      lemmas      := lemmas,
-     in_progress := [⟨g, lemmas⟩] }
+     in_progress := [⟨gmvar, lemmas⟩] }
 
 -- keep only uninstantiable metavariables
-meta def filter_mvars (L : list expr) : tactic (list expr) :=
-(list.filter (λ e, e.is_meta_var)) <$> (L.mmap (λ e, instantiate_mvars e))
+meta def partition_mvars (L : list goal_mvar) : tactic (list goal_mvar × list goal_mvar) :=
+(list.partition (λ e, e.synthetic.is_meta_var)) <$>
+  (L.mmap (λ e, do e' ← instantiate_mvars e.synthetic, return ⟨e.original, e'⟩))
 
-meta def filter_apply_state_mvars (L : list apply_state) : tactic (list apply_state) :=
-(list.filter (λ as, as.goal.is_meta_var)) <$> (L.mmap (λ as, do e' ← instantiate_mvars as.goal, return ⟨e', as.lemmas⟩))
+meta def partition_apply_state_mvars (L : list apply_state) : tactic (list apply_state × list apply_state) :=
+(list.partition (λ as, as.goal.synthetic.is_meta_var)) <$>
+  (L.mmap (λ as, do e' ← instantiate_mvars as.goal.synthetic, return ⟨⟨as.goal.original, e'⟩, as.lemmas⟩))
 
 -- TODO remove in cleanup
 meta def pad_trace (n : ℕ) {α : Type} [has_to_tactic_format α] (a : α) : tactic unit :=
@@ -100,29 +117,33 @@ do let s := (list.repeat ' ' n).as_string,
 * and remove applied iffs.
 -/
 meta def back_state.clean (s : back_state) (last_lemma : back_lemma) : tactic back_state :=
-do stashed     ← filter_mvars s.stashed,
-   committed   ← filter_apply_state_mvars s.committed,
-   in_progress ← filter_apply_state_mvars s.in_progress,
+do (stashed, completed_1) ← partition_mvars s.stashed,
+   (committed, completed_2)   ← partition_apply_state_mvars s.committed,
+   (in_progress, completed_3) ← partition_apply_state_mvars s.in_progress,
+   let completed := s.completed ++ completed_1 ++ (completed_2 ++ completed_3).map(apply_state.goal),
    -- We don't apply `iff` lemmas more than once.
    lemmas ← (iff_mp last_lemma.lem >> pure (s.lemmas.erase last_lemma))
             <|> pure s.lemmas,
    return
    { steps       := s.steps + 1,
      stashed     := stashed,
+     completed   := completed,
      committed   := committed,
      in_progress := in_progress,
      lemmas      := lemmas,
      .. s}
 
 meta def back_state.apply_lemma (s : back_state) (e : back_lemma) (committed : bool) : tactic back_state :=
-do apply_thorough e.lem,
+do trace $ "attempting to apply " ++ to_string e.lem,
+   get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
+  apply_thorough e.lem,
+  trace "!",
   --  goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
   --  pad_trace s.steps e,
-  --  get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
    s' ← s.clean e,
    (done >> return s') <|> do
    gs ← get_goals,
-   let as : list apply_state := gs.map $ λ g, ⟨g, s.lemmas⟩,
+   as ← gs.mmap $ λ g, (do gmvar ← mk_goal_mvar g, return (⟨gmvar, s.lemmas⟩ : apply_state)),
    if e.finishing ∨ committed then
      return { committed := as ++ s.committed, .. s' }
    else
@@ -135,7 +156,8 @@ meta def back_state.apply (s : back_state) (committed : bool) : apply_state → 
   | (h :: t) := do r ← try_core $ s.apply_lemma h committed,
                    match r with
                    | none := back_state.apply ⟨as.goal, t⟩
-                   | (some bs) := return [bs, s.add_goal committed ⟨as.goal, t⟩]
+                   | (some bs) := do ng ← as.goal.new_mvars,
+                                     return [bs, s.add_goal committed ⟨ng, t⟩]
                    end
   end
 
@@ -147,14 +169,14 @@ match s.committed with
   match s.in_progress with
   | [] := undefined
   | (p :: ps) :=
-  do set_goals [p.goal],
+  do set_goals [p.goal.synthetic],
      s.apply ff p <|>
      return [{ in_progress := ps, stashed := p.goal :: s.stashed, .. s }]
   end
 | (c :: cs) :=
   -- We must discharge `c`.
-  do set_goals [c.goal],
-     s.apply tt c
+  do set_goals [c.goal.synthetic],
+     s.apply tt c <|> return []
 end
 
 def lexicographic_preorder {α β : Type*} [preorder α] [decidable_eq α] [preorder β] : preorder (α × β) :=
@@ -166,11 +188,11 @@ def lexicographic_preorder {α β : Type*} [preorder α] [decidable_eq α] [preo
     cases h₁,
     { left,
       cases h₂,
-      exact lt_trans h₁ h₂,
-      rwa ←h₂.left },
+      { exact lt_trans h₁ h₂ },
+      { rwa ←h₂.left } },
     { cases h₂,
-      left, rwa h₁.left,
-      right, split, exact eq.trans h₁.1 h₂.1, exact le_trans h₁.2 h₂.2
+      { left, rwa h₁.left },
+      { exact or.inr ⟨eq.trans h₁.1 h₂.1, le_trans h₁.2 h₂.2⟩ }
     } end }
 local attribute [instance] lexicographic_preorder
 
@@ -197,7 +219,6 @@ private meta def run_one_step : list back_state → tactic (back_state ⊕ (list
   else
     do c ← h.children,
        return $ sum.inr $ insert_new_states c t
-
 
 private meta def run : list back_state → tactic back_state
 | states :=
@@ -237,7 +258,9 @@ private meta def run : list back_state → tactic back_state
 meta def back (progress finishing : list expr) (limit : option ℕ) : tactic unit :=
 do i ← back_state.init progress finishing limit,
    f ← run [i],
-   set_goals (f.stashed),
+   f.completed.mmap (λ g, unify g.original g.synthetic),
+   f.stashed.mmap   (λ g, unify g.original g.synthetic),
+   set_goals (f.stashed.map(goal_mvar.original)),
    guard (f.steps > 0) -- Make sure some progress was made.
 
 private meta def lookup_tagged_lemma (n : name) : tactic (bool × expr) :=

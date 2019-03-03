@@ -10,11 +10,30 @@ begin
   trivial
 end
 
+example {P : Prop} (h : P) : P :=
+by back
+
+example {P Q : Prop} (h₁ : P) (h₂ : Q) : P :=
+by back
+
+example {P Q : Prop} (h₁ : P) (h₂ : Q) : Q :=
+by back
+
+example {P Q : Prop} (h₁ : P) (h₂ : P → Q) : Q :=
+by back
+
+example {P Q R : Prop} (h₁ : P) (h₂ : P → Q) (h₃ : R → Q) : Q :=
+by back
+
+example {P Q R : Prop} (h₁ : R) (h₂ : P → Q) (h₃ : R → Q) : Q :=
+by back
+
 -- Verify that `back` uses `congr_arg`.
 example (f : ℕ → ℕ) (x y : ℕ) (p : x = y) : f x = f y :=
 begin
   success_if_fail { back [-congr_arg] },
-  back
+  apply congr_fun,
+  back,
 end
 
 section primes
