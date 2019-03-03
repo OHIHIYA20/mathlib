@@ -37,26 +37,28 @@ meta structure apply_state :=
 
 meta structure back_state :=
 (steps        : ℕ := 0)
-(limit        : option ℕ)
+(limit        : ℕ)
 (lemmas       : list back_lemma) -- We carry the lemmas along, as we may want to reorder or discard some.
 (tactic_state : tactic_state)    -- We carry the whole state along, so each back_state has its own metavariables.
 (stashed      : list expr := {})   -- Stores goals which we're going to return to the user.
 (completed    : list expr := {})   -- Stores completed goals.
 (committed    : list apply_state := {}) -- Stores goals which we must complete.
 (in_progress  : list apply_state)       -- Stores goals which we're still working on.
-
-meta instance : has_to_string back_state :=
-{ to_string := λ s, to_string format!"back_state: {s.stashed.length}/{s.completed.length}/{s.committed.length}/{s.in_progress.length}" }
-
-meta instance has_to_tactic_format_back_state : has_to_tactic_format back_state :=
-{ to_tactic_format := λ s,
-    do return $ to_string s }
+(num_mvars    : ℕ)
 
 -- TODO Think hard about what goes here; possibly allow customisation.
 meta def back_state.complexity (s : back_state) : ℕ × ℕ × ℕ :=
 -- (s.committed.length, s.in_progress.length, s.steps)
 -- It seems essential to put in_progress first, or we don't work hard enough.
-(s.in_progress.length, s.committed.length, s.steps) -- this is probably better??
+(s.stashed.length, s.in_progress.length + s.committed.length + s.num_mvars + s.steps, s.steps) -- this is probably better??
+
+meta instance : has_to_string back_state :=
+{ to_string := λ s, to_string format!"back_state: {s.stashed.length}/{s.completed.length}/{s.committed.length}/{s.in_progress.length}/{s.num_mvars}" }
+
+meta instance has_to_tactic_format_back_state : has_to_tactic_format back_state :=
+{ to_tactic_format := λ s,
+    do return $ to_string s }
+
 
 meta def back_state.done (s : back_state) : bool :=
 s.committed.empty ∧ s.in_progress.empty
@@ -88,10 +90,11 @@ meta def back_state.init (goal : expr) (progress finishing : list expr) (limit :
                              (progress.enum.map  (λ e, ⟨e.2, ff, e.1 + finishing.length⟩)),
    return
    { back_state .
-     limit        := limit,
+     limit        := limit.get_or_else 20,
      lemmas       := lemmas,
      tactic_state := s,
-     in_progress  := [⟨goal, lemmas⟩] }) s
+     in_progress  := [⟨goal, lemmas⟩],
+     num_mvars    := 0 }) s
 
 -- keep only uninstantiable metavariables
 meta def partition_mvars (L : list expr) : tactic (list expr × list expr) :=
@@ -107,15 +110,6 @@ meta def pad_trace (n : ℕ) {α : Type} [has_to_tactic_format α] (a : α) : ta
 do let s := (list.repeat '.' n).as_string,
    p ← pp a,
    trace (s ++ sformat!"{p}")
-
--- Given a tactic that produces a new back_state, we can run that in the context
--- of a tactic_state contained within a back_state...
-meta def back_state.run (s : back_state) (tac : tactic back_state) : tactic back_state :=
-λ ts,
-  match tac s.tactic_state with
-  | result.success s' sts' := result.success { tactic_state := sts', ..s' } ts
-  | result.exception msg pos sts' := result.exception msg pos ts
-  end
 
 /--
 * Discard any goals which have already been solved,
@@ -140,10 +134,21 @@ do (stashed,     completed_1) ← partition_mvars s.stashed,
      lemmas      := lemmas,
      .. s }
 
-meta def back_state.apply_lemma (s : back_state) (g : expr) (e : back_lemma) (committed : bool) : tactic back_state :=
-s.run $
+-- Given a tactic that produces a new back_state, we can run that in the context
+-- of a tactic_state contained within a back_state...
+meta def back_state.run_on_bundled_state (s : back_state) {α : Type*} (tac : tactic (back_state × α)) : tactic (back_state × α) :=
+λ ts,
+  match tac s.tactic_state with
+  | result.success s' sts' := result.success ({ tactic_state := sts', ..s'.1 }, s'.2) ts
+  | result.exception msg pos sts' := result.exception msg pos ts
+  end
+
+meta def back_state.apply_lemma (s : back_state) (g : expr) (e : back_lemma) (committed : bool) : tactic (back_state × bool) :=
+s.run_on_bundled_state $
 do trace $ "attempting to apply " ++ to_string e.lem,
    set_goals [g],
+   prop ← is_proof g,
+   explicit ← (list.empty ∘ expr.list_meta_vars) <$> infer_type g,
    get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
    apply_thorough e.lem,
    trace "!",
@@ -151,24 +156,32 @@ do trace $ "attempting to apply " ++ to_string e.lem,
   --  goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
   --  pad_trace s.steps e,
    s' ← s.clean g e,
-   trace "cleaned",
-   (done >> return s') <|> do
+   (done >> return (s', prop ∧ explicit)) <|> do
    gs ← get_goals,
+   types ← gs.mmap infer_type,
+   let num_mvars := (types.map expr.list_meta_vars).join.length,
    as ← gs.mmap $ λ g, return (⟨g, s.lemmas⟩ : apply_state),
    if e.finishing ∨ committed then
-     return { committed := as ++ s.committed, .. s' }
+     return ({ committed := as ++ s.committed, num_mvars := num_mvars, .. s' }, ff)
    else
-     return { in_progress := as ++ s.in_progress, .. s' }
+     return ({ in_progress := as ++ s.in_progress, num_mvars := num_mvars, .. s' }, ff)
 
 meta def back_state.apply (s : back_state) (committed : bool) : apply_state → tactic (list back_state)
 | as :=
   match as.lemmas with
   | [] := fail "No lemmas applied to the current goal."
-  | (h :: t) := do r ← try_core $ s.apply_lemma as.goal h committed,
-                   match r with
-                   | none := back_state.apply ⟨as.goal, t⟩
-                   | (some bs) := return [bs, s.add_goal committed ⟨as.goal, t⟩]
-                   end
+  | (h :: t) :=
+    do r ← try_core $ s.apply_lemma as.goal h committed,
+       match r with
+       | none := back_state.apply ⟨as.goal, t⟩
+       | (some (bs, prop_discharged)) :=
+         do if prop_discharged then
+              -- TODO check no mvars!
+              -- if we discharged a propositional goal, don't consider other ways to solve it!
+              return [bs]
+            else
+              return [bs, s.add_goal committed ⟨as.goal, t⟩]
+       end
   end
 
 meta def back_state.apply_in_progress (s : back_state) : tactic (list back_state) :=
@@ -233,15 +246,19 @@ private meta def run_one_step : list back_state → tactic (back_state ⊕ (list
   if h.done then
     return $ sum.inl h
   else
-    do c ← h.children,
-       trace "children:",
-       trace c,
-       return $ sum.inr $ insert_new_states c t
+    do if h.steps > h.limit then
+         return $ sum.inr t
+       else do
+         c ← h.children,
+         trace "children:",
+         trace c,
+         return $ sum.inr $ insert_new_states c t
 
 private meta def run : list back_state → tactic back_state
 | states :=
-  do trace "run:",
-     trace states,
+  do
+    --  trace "run:",
+    --  trace states,
      r ← run_one_step states,
      match r with
      | (sum.inl success) := return success
