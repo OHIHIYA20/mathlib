@@ -13,7 +13,7 @@ meta def back_attribute : user_attribute unit (option unit) := {
 "A lemma that should be applied to a goal whenever possible;
 use the tactic `back` to automatically `apply` all lemmas tagged `[back]`.
 Lemmas tagged with `[back!]` will be applied even if the
-resulting goals cannot all be discharged.",
+resulting subgoals cannot all be discharged.",
   parser := optional $ lean.parser.tk "!"
 }
 
@@ -38,36 +38,43 @@ meta structure apply_state :=
 meta structure back_state :=
 (steps        : ℕ := 0)
 (limit        : ℕ)
-(lemmas       : list back_lemma) -- We carry the lemmas along, as we may want to reorder or discard some.
-(tactic_state : tactic_state)    -- We carry the whole state along, so each back_state has its own metavariables.
+/- We carry the full list of lemmas along, as we may want to reorder or discard some.
+-- (e.g. we don't use `iff` lemmas more than once, to avoid loops) -/
+(facts        : list back_lemma) -- A `fact` is a lemma with no hypotheses; usually a local hypothesis
+(lemmas       : list back_lemma) -- All other lemmas
+/- We carry along an internal `tactic_state`,
+-- so metavariables aren't contaminated by other branches of the search. -/
+(tactic_state : tactic_state)
 (stashed      : list expr := {})   -- Stores goals which we're going to return to the user.
 (completed    : list expr := {})   -- Stores completed goals.
-(committed    : list apply_state := {}) -- Stores goals which we must complete.
-(in_progress  : list apply_state)       -- Stores goals which we're still working on.
+/-
+We track four separate lists of goals.
+`committed` goals are goals which we must complete.
+`in_progress` goals are goals which we're allowed to stash if we make no further progress.
+`_new` goals are goals which we haven't tried applying the `facts` to yet; these are high priority.
+`_fc` goals are goals which we've already "fact-checked".
+-/
+(committed_new   : list apply_state := {})
+(in_progress_new : list apply_state)
+(committed_fc    : list apply_state := {})
+(in_progress_fc  : list apply_state := {})
 (num_mvars    : ℕ)
 
 -- TODO Think hard about what goes here; possibly allow customisation.
 meta def back_state.complexity (s : back_state) : ℕ × ℕ × ℕ :=
--- (s.committed.length, s.in_progress.length, s.steps)
--- It seems essential to put in_progress first, or we don't work hard enough.
-(s.stashed.length, s.in_progress.length + s.committed.length + s.num_mvars + s.steps, s.steps) -- this is probably better??
+-- It's essential to put `stashed` first, so that stashed goals are not returned until
+-- we've exhausted other branches of the search tree.
+(s.stashed.length, s.in_progress_fc.length + s.committed_fc.length, s.steps + s.num_mvars) -- this is probably better??
 
 meta instance : has_to_string back_state :=
-{ to_string := λ s, to_string format!"back_state: {s.stashed.length}/{s.completed.length}/{s.committed.length}/{s.in_progress.length}/{s.num_mvars}" }
+{ to_string := λ s, to_string format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.committed_new.length}/{s.in_progress_new.length}/{s.committed_fc.length}/{s.in_progress_fc.length}) ({s.num_mvars}/{s.steps})" }
 
 meta instance has_to_tactic_format_back_state : has_to_tactic_format back_state :=
 { to_tactic_format := λ s,
     do return $ to_string s }
 
-
 meta def back_state.done (s : back_state) : bool :=
-s.committed.empty ∧ s.in_progress.empty
-
-meta def back_state.add_goal (s : back_state) (committed : bool) (as : apply_state) :=
-if committed then
-  { committed := as :: s.committed .. s }
-else
-  { in_progress := as :: s.in_progress .. s }
+s.committed_new.empty ∧ s.in_progress_new.empty ∧ s.committed_fc.empty ∧ s.in_progress_fc.empty
 
 -- Count the number of arguments not determined by later arguments.
 meta def count_arrows : expr → ℕ
@@ -86,15 +93,25 @@ do M ← L.mmap (λ e, do c ← count_arrows <$> infer_type e.lem, return (c, e)
 meta def back_state.init (goal : expr) (progress finishing : list expr) (limit : option ℕ) : tactic back_state :=
 λ s, (do
    -- We sort the lemmas, preferring lemmas which, when applied, will produce fewer new goals.
-   lemmas ← sort_by_arrows $ (finishing.enum.map (λ e, ⟨e.2, tt, e.1⟩)) ++
-                             (progress.enum.map  (λ e, ⟨e.2, ff, e.1 + finishing.length⟩)),
+   let all_lemmas : list back_lemma :=
+     (finishing.enum.map (λ e, ⟨e.2, tt, e.1⟩)) ++
+     (progress.enum.map  (λ e, ⟨e.2, ff, e.1 + finishing.length⟩)),
+   lemmas_with_counts ← all_lemmas.mmap (λ e, do c ← count_arrows <$> infer_type e.lem, return (c, e)),
+   let (facts', lemmas) := lemmas_with_counts.partition (λ p : ℕ × back_lemma, p.1 = 0),
+   let facts := facts'.map (λ p, p.2),
+   let sorted_lemmas := ((list.qsort (λ (p q : ℕ × back_lemma), p.1 ≤ q.1) lemmas).map (λ p, p.2)),
+   trace "facts:",
+   trace $ facts.map (λ f, f.lem),
+   trace "lemmas:",
+   trace $ sorted_lemmas.map (λ f, f.lem),
    return
    { back_state .
-     limit        := limit.get_or_else 20,
-     lemmas       := lemmas,
-     tactic_state := s,
-     in_progress  := [⟨goal, lemmas⟩],
-     num_mvars    := 0 }) s
+     limit           := limit.get_or_else 20,
+     facts           := facts,
+     lemmas          := sorted_lemmas,
+     tactic_state    := s,
+     in_progress_new := [⟨goal, facts⟩],
+     num_mvars       := 0 }) s
 
 -- keep only uninstantiable metavariables
 meta def partition_mvars (L : list expr) : tactic (list expr × list expr) :=
@@ -118,9 +135,11 @@ do let s := (list.repeat '.' n).as_string,
 -/
 meta def back_state.clean (s : back_state) (g : expr) (last_lemma : back_lemma) : tactic back_state :=
 do (stashed,     completed_1) ← partition_mvars s.stashed,
-   (committed,   completed_2) ← partition_apply_state_mvars s.committed,
-   (in_progress, completed_3) ← partition_apply_state_mvars s.in_progress,
-   let completed := s.completed ++ completed_1 ++ (completed_2 ++ completed_3).map(apply_state.goal),
+   (committed_new,   completed_2) ← partition_apply_state_mvars s.committed_new,
+   (in_progress_new, completed_3) ← partition_apply_state_mvars s.in_progress_new,
+   (committed_fc,   completed_4) ← partition_apply_state_mvars s.committed_fc,
+   (in_progress_fc, completed_5) ← partition_apply_state_mvars s.in_progress_fc,
+   let completed := s.completed ++ completed_1 ++ (completed_2 ++ completed_3 ++ completed_4 ++ completed_5).map(apply_state.goal),
    -- We don't apply `iff` lemmas more than once.
    lemmas ← (iff_mp last_lemma.lem >> pure (s.lemmas.erase last_lemma))
             <|> pure s.lemmas,
@@ -129,8 +148,10 @@ do (stashed,     completed_1) ← partition_mvars s.stashed,
      steps       := s.steps + 1,
      stashed     := stashed,
      completed   := g :: completed,
-     committed   := committed,
-     in_progress := in_progress,
+     committed_new   := committed_new,
+     in_progress_new := in_progress_new,
+     committed_fc    := committed_fc,
+     in_progress_fc  := in_progress_fc,
      lemmas      := lemmas,
      .. s }
 
@@ -160,13 +181,26 @@ do trace $ "attempting to apply " ++ to_string e.lem,
    gs ← get_goals,
    types ← gs.mmap infer_type,
    let num_mvars := (types.map expr.list_meta_vars).join.length,
-   as ← gs.mmap $ λ g, return (⟨g, s.lemmas⟩ : apply_state),
+   as ← gs.mmap $ λ g, return (⟨g, s.facts⟩ : apply_state),
    if e.finishing ∨ committed then
-     return ({ committed := as ++ s.committed, num_mvars := num_mvars, .. s' }, ff)
+     return ({ committed_new := as ++ s.committed_new, num_mvars := num_mvars, .. s' }, ff)
    else
-     return ({ in_progress := as ++ s.in_progress, num_mvars := num_mvars, .. s' }, ff)
+     return ({ in_progress_new := as ++ s.in_progress_new, num_mvars := num_mvars, .. s' }, ff)
 
-meta def back_state.apply (s : back_state) (committed : bool) : apply_state → tactic (list back_state)
+
+meta def back_state.add_goal (s : back_state) (new committed : bool) (as : apply_state) :=
+if committed then
+  if new then
+    { committed_new := as :: s.committed_new .. s }
+  else
+    { committed_fc := as :: s.committed_fc .. s }
+else
+  if new then
+    { in_progress_new := as :: s.in_progress_new .. s }
+  else
+    { in_progress_fc := as :: s.in_progress_fc .. s }
+
+meta def back_state.apply (s : back_state) (new committed : bool) : apply_state → tactic (list back_state)
 | as :=
   match as.lemmas with
   | [] := fail "No lemmas applied to the current goal."
@@ -176,34 +210,61 @@ meta def back_state.apply (s : back_state) (committed : bool) : apply_state → 
        | none := back_state.apply ⟨as.goal, t⟩
        | (some (bs, prop_discharged)) :=
          do if prop_discharged then
-              -- TODO check no mvars!
               -- if we discharged a propositional goal, don't consider other ways to solve it!
               return [bs]
             else
-              return [bs, s.add_goal committed ⟨as.goal, t⟩]
+              return [bs, s.add_goal new committed ⟨as.goal, t⟩]
        end
   end
 
-meta def back_state.apply_in_progress (s : back_state) : tactic (list back_state) :=
-match s.in_progress with
+meta def back_state.apply_in_progress_fc (s : back_state) : tactic (list back_state) :=
+match s.in_progress_fc with
 | [] := undefined
 | (p :: ps) :=
-  do let s' := { in_progress := ps, ..s },
-     s'.apply ff p <|>
+  do let s' := { in_progress_fc := ps, ..s },
+     s'.apply ff ff p <|>
      return (if s'.steps > 0 then [{ stashed := p.goal :: s'.stashed, .. s' }] else [])
 end
 
-meta def back_state.apply_committed (s : back_state) : tactic (list back_state) :=
-match s.committed with
+meta def back_state.apply_committed_fc (s : back_state) : tactic (list back_state) :=
+match s.committed_fc with
 | [] := undefined
 | (c :: cs) :=
   -- We must discharge `c`.
-  do let s' := { committed := cs, ..s },
-     s'.apply tt c <|> return []
+  do let s' := { committed_fc := cs, ..s },
+     s'.apply ff tt c <|> return []
+end
+
+meta def back_state.apply_in_progress_new (s : back_state) : tactic (list back_state) :=
+match s.in_progress_new with
+| [] := undefined
+| (p :: ps) :=
+  do let s' := { in_progress_new := ps, ..s },
+     s'.apply tt ff p <|>
+     return [{ in_progress_fc := ⟨p.goal, s.lemmas⟩ :: s'.in_progress_fc, .. s' }]
+end
+
+meta def back_state.apply_committed_new (s : back_state) : tactic (list back_state) :=
+match s.committed_new with
+| [] := undefined
+| (c :: cs) :=
+  -- We must discharge `c`.
+  do let s' := { committed_new := cs, ..s },
+     s'.apply tt tt c <|>
+     return [{ committed_fc := ⟨c.goal, s.lemmas⟩ :: s'.committed_fc, .. s' }]
 end
 
 meta def back_state.children (s : back_state) : tactic (list back_state) :=
-if s.committed.empty then s.apply_in_progress else s.apply_committed
+if s.committed_new.empty then
+  if s.in_progress_new.empty then
+    if s.committed_fc.empty then
+      s.apply_in_progress_fc
+    else
+      s.apply_committed_fc
+  else
+    s.apply_in_progress_new
+else
+  s.apply_committed_new
 
 def lexicographic_preorder {α β : Type*} [preorder α] [preorder β] : preorder (α × β) :=
 { le := λ a b, a.1 < b.1 ∨ (a.1 = b.1 ∧ a.2 ≤ b.2),
@@ -257,8 +318,8 @@ private meta def run_one_step : list back_state → tactic (back_state ⊕ (list
 private meta def run : list back_state → tactic back_state
 | states :=
   do
-    --  trace "run:",
-    --  trace states,
+     trace "run:",
+     trace states,
      r ← run_one_step states,
      match r with
      | (sum.inl success) := return success
