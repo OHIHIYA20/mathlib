@@ -3,6 +3,7 @@
 -- Authors: Scott Morrison, Keeley Hoek
 
 import tactic.basic
+import data.list.basic
 
 namespace environment
 meta def decl_omap {α : Type} (e : environment) (f : declaration → option α) : list α :=
@@ -41,6 +42,32 @@ resulting subgoals cannot all be discharged.",
 
 /-- Stub for implementing faster lemma filtering using Pi binders in the goal -/
 private meta def is_lemma_applicable (lem : expr) : tactic bool := return true
+
+meta def head_symbol : expr → name
+| (expr.pi _ _ _ t) := head_symbol t
+| (expr.app f _) := head_symbol f
+| (expr.const n _) := n
+| _ := `_
+
+meta def symbols : expr → list name
+| (expr.pi _ _ e t) := symbols e ++ symbols t
+| (expr.app f _) := symbols f
+| (expr.const n _) := [n]
+| _ := [`_]
+
+#check list.forall_mem_inter_of_forall_left
+example : true :=
+begin
+  (do e ← to_expr ``(nat.dvd_add_iff_left) >>= infer_type, trace $ head_symbol e),
+  (do e ← to_expr ``(list.forall_mem_inter_of_forall_left) >>= infer_type, trace $ head_symbol e),
+  (do e ← to_expr ``(nat.dvd_add_iff_left) >>= infer_type, trace $ symbols e),
+  (do e ← to_expr ``(list.forall_mem_inter_of_forall_left) >>= infer_type, trace $ symbols e),
+end
+
+example (l₁ l₂ : list ℕ): ∀ x, x ∈ l₁ ∩ l₂ → x = 2 :=
+begin
+  apply list.forall_mem_inter_of_forall_left,
+end
 
 meta structure back_lemma :=
 (lem       : expr)
@@ -89,8 +116,8 @@ s.committed_new.empty ∧ s.in_progress_new.empty ∧ s.committed_fc.empty ∧ s
 meta def back_state.complexity (s : back_state) : ℕ × bool × ℕ × ℕ :=
 -- It's essential to put `stashed` first, so that stashed goals are not returned until
 -- we've exhausted other branches of the search tree.
-(s.stashed.length, s.done, 2 * s.in_progress_fc.length + 2 * s.committed_fc.length + s.steps, s.steps + s.num_mvars) -- works!
--- (s.stashed.length, s.done, 2 * s.in_progress_fc.length + 2 * s.committed_fc.length + s.in_progress_new.length + s.committed_new.length, s.steps + s.num_mvars)
+-- (s.stashed.length, s.done, 2 * s.in_progress_fc.length + 2 * s.committed_fc.length + s.steps, s.steps + s.num_mvars) -- works!
+(s.stashed.length, s.done, 16 * s.in_progress_fc.length + 16 * s.committed_fc.length + 4 * s.in_progress_new.length + 4 * s.committed_new.length + s.steps, s.steps + s.num_mvars)
 
 meta instance : has_to_string back_state :=
 { to_string := λ s, to_string format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.committed_new.length}/{s.in_progress_new.length}/{s.committed_fc.length}/{s.in_progress_fc.length}) ({s.num_mvars}/{s.steps})" }
