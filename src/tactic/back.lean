@@ -3,7 +3,7 @@
 -- Authors: Scott Morrison, Keeley Hoek
 
 import tactic.basic
-import data.list.basic
+-- import data.list.basic
 
 namespace environment
 meta def decl_omap {α : Type} (e : environment) (f : declaration → option α) : list α :=
@@ -20,8 +20,6 @@ meta def get_decls (e : environment) : list declaration :=
 
 meta def get_trusted_decl_names (e : environment) : list name :=
   e.decl_omap (λ d, if d.is_trusted then some d.to_name else none)
-
-#check undefined
 
 meta def get_decl_names (e : environment) : list name :=
   e.decl_map declaration.to_name
@@ -49,25 +47,32 @@ meta def head_symbol : expr → name
 | (expr.const n _) := n
 | _ := `_
 
-meta def symbols : expr → list name
-| (expr.pi _ _ e t) := symbols e ++ symbols t
-| (expr.app f _) := symbols f
+meta def head_symbols : expr → list name
+| (expr.pi _ _ _ t) := head_symbols t
+| `(%%a ↔ %%b) := head_symbols a ++ head_symbols b
+| (expr.app f _) := head_symbols f
 | (expr.const n _) := [n]
 | _ := [`_]
 
-#check list.forall_mem_inter_of_forall_left
-example : true :=
-begin
-  (do e ← to_expr ``(nat.dvd_add_iff_left) >>= infer_type, trace $ head_symbol e),
-  (do e ← to_expr ``(list.forall_mem_inter_of_forall_left) >>= infer_type, trace $ head_symbol e),
-  (do e ← to_expr ``(nat.dvd_add_iff_left) >>= infer_type, trace $ symbols e),
-  (do e ← to_expr ``(list.forall_mem_inter_of_forall_left) >>= infer_type, trace $ symbols e),
-end
+meta def symbols : expr → list name
+| (expr.pi _ _ e t) := symbols e ++ symbols t
+| (expr.app f _) := head_symbols f
+| (expr.const n _) := [n]
+| _ := [`_]
 
-example (l₁ l₂ : list ℕ): ∀ x, x ∈ l₁ ∩ l₂ → x = 2 :=
-begin
-  apply list.forall_mem_inter_of_forall_left,
-end
+-- #check list.forall_mem_inter_of_forall_left
+-- example : true :=
+-- begin
+--   (do e ← to_expr ``(nat.dvd_add_iff_left) >>= infer_type, trace $ head_symbol e),
+--   (do e ← to_expr ``(list.forall_mem_inter_of_forall_left) >>= infer_type, trace $ head_symbol e),
+--   (do e ← to_expr ``(nat.dvd_add_iff_left) >>= infer_type, trace $ symbols e),
+--   (do e ← to_expr ``(@list.forall_mem_inter_of_forall_left) >>= infer_type, trace $ symbols e),
+-- end
+
+-- example (l₁ l₂ : list ℕ): ∀ x, x ∈ l₁ ∩ l₂ → x = 2 :=
+-- begin
+--   apply list.forall_mem_inter_of_forall_left,
+-- end
 
 meta structure back_lemma :=
 (lem       : expr)
@@ -78,10 +83,21 @@ meta structure back_lemma :=
 meta instance : decidable_eq back_lemma :=
 λ a b, if a.index = b.index then is_true undefined else is_false undefined
 
+-- Can be much better!
+meta def filter_lemmas (goal_type : expr) (lemmas : list back_lemma) : tactic (list back_lemma) :=
+do trace format!"filtering lemmas for {goal_type}",
+   let hs := head_symbol goal_type,
+   trace hs,
+   lemmas.mmap $ λ l, (do t ← infer_type l.lem, return (l.lem, head_symbols t)) >>= trace,
+   result ← lemmas.mfilter $ λ l, (do t ← infer_type l.lem, return $ hs ∈ head_symbols t),
+   trace $ result.map back_lemma.lem,
+   return result
+
 -- An expr representing a goal, along with a list of lemmas which we have not yet tried
 -- `apply`ing against that goal.
 meta structure apply_state :=
-(goal   : expr)
+(goal      : expr)
+(goal_type : expr) -- We store this explicitly, rather than looking it up with `infer_type` as needed, because we're doing manual tactic_state management
 (lemmas : list back_lemma)
 
 meta structure back_state :=
@@ -109,16 +125,6 @@ We track four separate lists of goals.
 (in_progress_fc  : list apply_state := {})
 (num_mvars    : ℕ)
 
-meta def back_state.done (s : back_state) : bool :=
-s.committed_new.empty ∧ s.in_progress_new.empty ∧ s.committed_fc.empty ∧ s.in_progress_fc.empty
-
--- TODO Think hard about what goes here; possibly allow customisation.
-meta def back_state.complexity (s : back_state) : ℕ × bool × ℕ × ℕ :=
--- It's essential to put `stashed` first, so that stashed goals are not returned until
--- we've exhausted other branches of the search tree.
--- (s.stashed.length, s.done, 2 * s.in_progress_fc.length + 2 * s.committed_fc.length + s.steps, s.steps + s.num_mvars) -- works!
-(s.stashed.length, s.done, 16 * s.in_progress_fc.length + 16 * s.committed_fc.length + 4 * s.in_progress_new.length + 4 * s.committed_new.length + s.steps, s.steps + s.num_mvars)
-
 meta instance : has_to_string back_state :=
 { to_string := λ s, to_string format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.committed_new.length}/{s.in_progress_new.length}/{s.committed_fc.length}/{s.in_progress_fc.length}) ({s.num_mvars}/{s.steps})" }
 
@@ -128,6 +134,16 @@ meta instance has_to_format_back_state : has_to_format back_state :=
 meta instance has_to_tactic_format_back_state : has_to_tactic_format back_state :=
 { to_tactic_format := λ s,
     do return $ to_string s }
+
+meta def back_state.done (s : back_state) : bool :=
+s.committed_new.empty ∧ s.in_progress_new.empty ∧ s.committed_fc.empty ∧ s.in_progress_fc.empty
+
+-- TODO Think hard about what goes here; possibly allow customisation.
+meta def back_state.complexity (s : back_state) : ℕ × bool × ℕ × ℕ :=
+-- It's essential to put `stashed` first, so that stashed goals are not returned until
+-- we've exhausted other branches of the search tree.
+-- (s.stashed.length, s.done, 2 * s.in_progress_fc.length + 2 * s.committed_fc.length + s.steps, s.steps + s.num_mvars) -- works!
+(s.stashed.length, s.done, 16 * s.in_progress_fc.length + 16 * s.committed_fc.length + 4 * s.in_progress_new.length + 4 * s.committed_new.length + s.steps, s.steps + s.num_mvars)
 
 -- Count the number of arguments not determined by later arguments.
 meta def count_arrows : expr → ℕ
@@ -157,13 +173,14 @@ meta def back_state.init (goal : expr) (progress finishing : list expr) (limit :
    trace $ facts.map (λ f, f.lem),
    trace "lemmas:",
    trace $ sorted_lemmas.map (λ f, f.lem),
+   goal_type ← infer_type goal,
    return
    { back_state .
      limit           := limit.get_or_else 20,
      facts           := facts,
      lemmas          := sorted_lemmas,
      tactic_state    := s,
-     in_progress_new := [⟨goal, facts⟩],
+     in_progress_new := [⟨goal, goal_type, facts⟩],
      num_mvars       := 0 }) s
 
 -- keep only uninstantiable metavariables
@@ -173,7 +190,7 @@ meta def partition_mvars (L : list expr) : tactic (list expr × list expr) :=
 
 meta def partition_apply_state_mvars (L : list apply_state) : tactic (list apply_state × list apply_state) :=
 (list.partition (λ as, as.goal.is_meta_var)) <$>
-  (L.mmap (λ as, do e' ← instantiate_mvars as.goal, return ⟨e', as.lemmas⟩))
+  (L.mmap (λ as, do e' ← instantiate_mvars as.goal, return ⟨e', as.goal_type, as.lemmas⟩))
 
 -- TODO remove in cleanup
 meta def pad_trace (n : ℕ) {α : Type} [has_to_tactic_format α] (a : α) : tactic unit :=
@@ -238,7 +255,7 @@ do --trace $ "attempting to apply " ++ to_string e.lem,
    success_if_fail $ types.mfirst $ λ t, unify t expr.mk_false,
   --  guard ¬(expr.mk_false ∈ types),
    let num_mvars := (types.map expr.list_meta_vars).join.length,
-   as ← gs.mmap $ λ g, return (⟨g, s.facts⟩ : apply_state),
+   as ← gs.mmap $ λ g, (do t ← infer_type g, relevant_facts ← filter_lemmas t s.facts, return (⟨g, t, relevant_facts⟩ : apply_state)),
    if e.finishing ∨ committed then
      return ({ committed_new := as ++ s.committed_new, num_mvars := num_mvars, .. s' }, ff)
    else
@@ -264,13 +281,13 @@ meta def back_state.apply (s : back_state) (new committed : bool) : apply_state 
   | (h :: t) :=
     do r ← try_core $ s.apply_lemma as.goal h committed,
        match r with
-       | none := back_state.apply ⟨as.goal, t⟩
+       | none := back_state.apply ⟨as.goal, as.goal_type, t⟩
        | (some (bs, prop_discharged)) :=
          do if prop_discharged then
               -- if we discharged a propositional goal, don't consider other ways to solve it!
               return [bs]
             else
-              return [bs, s.add_goal new committed ⟨as.goal, t⟩]
+              return [bs, s.add_goal new committed ⟨as.goal, as.goal_type, t⟩]
        end
   end
 
@@ -298,7 +315,8 @@ match s.in_progress_new with
 | (p :: ps) :=
   do let s' := { in_progress_new := ps, ..s },
      s'.apply tt ff p <|>
-     return [{ in_progress_fc := ⟨p.goal, s.lemmas⟩ :: s'.in_progress_fc, .. s' }]
+     do relevant_lemmas ← filter_lemmas p.goal_type s.lemmas,
+        return [{ in_progress_fc := ⟨p.goal, p.goal_type, relevant_lemmas⟩ :: s'.in_progress_fc, .. s' }]
 end
 
 meta def back_state.apply_committed_new (s : back_state) : tactic (list back_state) :=
@@ -308,7 +326,7 @@ match s.committed_new with
   -- We must discharge `c`.
   do let s' := { committed_new := cs, ..s },
      s'.apply tt tt c <|>
-     return [{ committed_fc := ⟨c.goal, s.lemmas⟩ :: s'.committed_fc, .. s' }]
+     return [{ committed_fc := ⟨c.goal, c.goal_type, s.lemmas⟩ :: s'.committed_fc, .. s' }]
 end
 
 meta def back_state.children (s : back_state) : tactic (list back_state) :=
@@ -341,13 +359,15 @@ def lexicographic_preorder {α β : Type*} [preorder α] [preorder β] : preorde
 local attribute [instance] lexicographic_preorder
 
 -- Just a check that we're actually using lexicographic ordering here.
-example : (5,10) < (10,3) := by exact dec_trivial
+example : (5,10) ≤ (10,3) := by exact dec_trivial
 
 def bool_preorder : preorder bool :=
 { le := λ a b, bor a (bnot b) = tt,
   le_refl := λ a, begin cases a; simp end,
   le_trans := λ a b c h₁ h₂, begin cases a; cases b; cases c; simp at *; assumption end }
 local attribute [instance] bool_preorder
+
+example : tt ≤ ff := by exact dec_trivial
 
 private meta def insert_new_state : back_state → list back_state → list back_state
 /- depth first search: -/
@@ -479,11 +499,12 @@ do
   (gex, hex) ← resolve_exception_ids all ex [] [],
   return (pr.reverse, fi.reverse, gex, hex, all)
 
-#check name
 meta def all_defs : tactic (list expr) :=
 do env ← get_env,
    let names := env.get_trusted_decl_names,
-   let names := names.filter $ λ n, n.components.head ≠ ".private" ∧ (to_string n.components.ilast).to_list.head ≠ '_' ∧ to_string n.components.ilast ≠ "inj_arrow",
+   let names := names.filter $ λ n,
+     n.components.head ≠ "_private" ∧ (to_string n.components.ilast).to_list.head ≠ '_'
+       ∧ to_string n.components.ilast ≠ "inj_arrow" ∧ to_string n.components.ilast ≠ "cases_on",
    names.mmap mk_const
 
 /--
