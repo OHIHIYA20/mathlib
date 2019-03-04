@@ -26,17 +26,7 @@ meta def get_decl_names (e : environment) : list name :=
 end environment
 
 namespace tactic
-
-@[user_attribute]
-meta def back_attribute : user_attribute unit (option unit) := {
-  name := `back,
-  descr :=
-"A lemma that should be applied to a goal whenever possible;
-use the tactic `back` to automatically `apply` all lemmas tagged `[back]`.
-Lemmas tagged with `[back!]` will be applied even if the
-resulting subgoals cannot all be discharged.",
-  parser := optional $ lean.parser.tk "!"
-}
+open native
 
 /-- Stub for implementing faster lemma filtering using Pi binders in the goal -/
 private meta def is_lemma_applicable (lem : expr) : tactic bool := return true
@@ -59,6 +49,24 @@ meta def symbols : expr → list name
 | (expr.app f _) := head_symbols f
 | (expr.const n _) := [n]
 | _ := [`_]
+
+@[user_attribute]
+meta def back_attribute : user_attribute (rb_map name (list name)) (option unit) := {
+  name := `back,
+  descr :=
+"A lemma that should be applied to a goal whenever possible;
+use the tactic `back` to automatically `apply` all lemmas tagged `[back]`.
+Lemmas tagged with `[back!]` will be applied even if the
+resulting subgoals cannot all be discharged.",
+  parser := optional $ lean.parser.tk "!",
+  cache_cfg :=
+   { mk_cache := λ ls,
+     do { ls.mfoldl (λ m dn,
+            do d ← get_decl dn,
+               pure $ (symbols d.type).foldl (λ m i, m.insert_cons i dn) m)
+            (rb_map.mk _ _) },
+     dependencies := [] }
+}
 
 -- #check list.forall_mem_inter_of_forall_left
 -- example : true :=
