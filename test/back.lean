@@ -32,7 +32,7 @@ by back?
 example (f : ℕ → ℕ) (x y : ℕ) (p : x = y) : f x = f y :=
 begin
   success_if_fail { back [-congr_arg] },
-  back,
+  back?,
 end
 
 section primes
@@ -56,7 +56,7 @@ begin
     simp at a,
     -- We can restrict the search depth:
     have h₁ : p ∣ M, { back 2 },
-    have h₂ : p ∣ fact N, { back [le_of_lt, prime.pos], },
+    have h₂ : p ∣ fact N, { back? [le_of_lt, prime.pos], },
     have h : p ∣ 1, { back [nat.dvd_add_iff_right] },
     back [prime.not_dvd_one],
   },

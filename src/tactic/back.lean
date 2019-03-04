@@ -263,7 +263,7 @@ do --trace $ "attempting to apply " ++ to_string e.lem,
          t ← infer_type g,
          relevant_facts ← filter_lemmas t s.facts,
          return { apply_state . goal := g, goal_type := t, committed := e.finishing ∨ committed, step := apply_step.facts, lemmas := relevant_facts }),
-   return ({ goals := as, num_mvars := num_mvars, ..s' }, ff)
+   return ({ goals := as ++ s.goals, num_mvars := num_mvars, ..s' }, ff)
 
 meta def back_state.add_goal (s : back_state) (as : apply_state) :=
 { goals := as :: s.goals .. s }
