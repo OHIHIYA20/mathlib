@@ -85,20 +85,32 @@ meta instance : decidable_eq back_lemma :=
 
 -- Can be much better!
 meta def filter_lemmas (goal_type : expr) (lemmas : list back_lemma) : tactic (list back_lemma) :=
-do trace format!"filtering lemmas for {goal_type}",
+do -- trace format!"filtering lemmas for {goal_type}",
    let hs := head_symbol goal_type,
-   trace hs,
-   lemmas.mmap $ λ l, (do t ← infer_type l.lem, return (l.lem, head_symbols t)) >>= trace,
+   -- trace hs,
+  --  lemmas.mmap $ λ l, (do t ← infer_type l.lem, return (l.lem, head_symbols t)) >>= trace,
    result ← lemmas.mfilter $ λ l, (do t ← infer_type l.lem, return $ hs ∈ head_symbols t),
-   trace $ result.map back_lemma.lem,
+   -- trace $ result.map back_lemma.lem,
    return result
+
+inductive apply_step
+| facts    -- We're working on lemmas with no hypotheses (likely all local hypotheses).
+| relevant -- We're working on lemmas with the same head constant as the goal.
+| others   -- We're getting desperate, and working on all remaining lemmas.
+
+def apply_step.weight : apply_step → ℕ
+| apply_step.facts := 1
+| apply_step.relevant := 4
+| apply_step.others := 16
 
 -- An expr representing a goal, along with a list of lemmas which we have not yet tried
 -- `apply`ing against that goal.
 meta structure apply_state :=
 (goal      : expr)
 (goal_type : expr) -- We store this explicitly, rather than looking it up with `infer_type` as needed, because we're doing manual tactic_state management
-(lemmas : list back_lemma)
+(committed : bool) -- If the goal is not 'committed', we can stash it if we get stuck.
+(step      : apply_step)
+(lemmas    : list back_lemma)
 
 meta structure back_state :=
 (steps        : ℕ := 0)
@@ -112,38 +124,29 @@ meta structure back_state :=
 (tactic_state : tactic_state)
 (stashed      : list expr := {})   -- Stores goals which we're going to return to the user.
 (completed    : list expr := {})   -- Stores completed goals.
-/-
-We track four separate lists of goals.
-`committed` goals are goals which we must complete.
-`in_progress` goals are goals which we're allowed to stash if we make no further progress.
-`_new` goals are goals which we haven't tried applying the `facts` to yet; these are high priority.
-`_fc` goals are goals which we've already "fact-checked".
--/
-(committed_new   : list apply_state := {})
-(in_progress_new : list apply_state)
-(committed_fc    : list apply_state := {})
-(in_progress_fc  : list apply_state := {})
+(goals        : list apply_state)
 (num_mvars    : ℕ)
 
-meta instance : has_to_string back_state :=
-{ to_string := λ s, to_string format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.committed_new.length}/{s.in_progress_new.length}/{s.committed_fc.length}/{s.in_progress_fc.length}) ({s.num_mvars}/{s.steps})" }
+-- meta instance : has_to_string back_state :=
+-- { to_string := λ s, to_string format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.committed_new.length}/{s.in_progress_new.length}/{s.committed_fc.length}/{s.in_progress_fc.length}) ({s.num_mvars}/{s.steps})" }
 
-meta instance has_to_format_back_state : has_to_format back_state :=
-{ to_format := λ s, to_string s }
+-- meta instance has_to_format_back_state : has_to_format back_state :=
+-- { to_format := λ s, to_string s }
 
-meta instance has_to_tactic_format_back_state : has_to_tactic_format back_state :=
-{ to_tactic_format := λ s,
-    do return $ to_string s }
+-- meta instance has_to_tactic_format_back_state : has_to_tactic_format back_state :=
+-- { to_tactic_format := λ s,
+--     do return $ to_string s }
 
 meta def back_state.done (s : back_state) : bool :=
-s.committed_new.empty ∧ s.in_progress_new.empty ∧ s.committed_fc.empty ∧ s.in_progress_fc.empty
+s.goals.empty
 
 -- TODO Think hard about what goes here; possibly allow customisation.
 meta def back_state.complexity (s : back_state) : ℕ × bool × ℕ × ℕ :=
 -- It's essential to put `stashed` first, so that stashed goals are not returned until
 -- we've exhausted other branches of the search tree.
 -- (s.stashed.length, s.done, 2 * s.in_progress_fc.length + 2 * s.committed_fc.length + s.steps, s.steps + s.num_mvars) -- works!
-(s.stashed.length, s.done, 16 * s.in_progress_fc.length + 16 * s.committed_fc.length + 4 * s.in_progress_new.length + 4 * s.committed_new.length + s.steps, s.steps + s.num_mvars)
+-- (s.stashed.length, s.done, 16 * s.in_progress_fc.length + 16 * s.committed_fc.length + 4 * s.in_progress_new.length + 4 * s.committed_new.length + s.steps, s.steps + s.num_mvars)
+(s.stashed.length, s.done, 4 * (s.goals.map (λ as : apply_state, as.step.weight)).sum + s.steps, s.steps + s.num_mvars)
 
 -- Count the number of arguments not determined by later arguments.
 meta def count_arrows : expr → ℕ
@@ -169,10 +172,11 @@ meta def back_state.init (goal : expr) (progress finishing : list expr) (limit :
    let (facts', lemmas) := lemmas_with_counts.partition (λ p : ℕ × bool × back_lemma, p.2.1 = ff),
    let facts := facts'.map (λ p, p.2.2),
    let sorted_lemmas := ((list.qsort (λ (p q : ℕ × bool × back_lemma), p.1 ≤ q.1) lemmas).map (λ p, p.2.2)),
-   trace "facts:",
-   trace $ facts.map (λ f, f.lem),
-   trace "lemmas:",
-   trace $ sorted_lemmas.map (λ f, f.lem),
+  --  let sorted_lemmas := lemmas.map (λ p, p.2.2),
+  --  trace "facts:",
+  --  trace $ facts.map (λ f, f.lem),
+  --  trace "lemmas:",
+  --  trace $ sorted_lemmas.map (λ f, f.lem),
    goal_type ← infer_type goal,
    return
    { back_state .
@@ -243,9 +247,9 @@ do --trace $ "attempting to apply " ++ to_string e.lem,
    goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
   --  pad_trace s.steps goal_types,
    apply_thorough e.lem,
-   pad_trace s.steps goal_types,
-   trace $  "successfully applied " ++ to_string e.lem,
-   get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
+  --  pad_trace s.steps goal_types,
+  --  trace $  "successfully applied " ++ to_string e.lem,
+  --  get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
   --  goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
   --  pad_trace s.steps e,
    s' ← s.clean g e,
@@ -393,9 +397,9 @@ private meta def run_one_step : list back_state → tactic (back_state ⊕ (list
     do if h.steps > h.limit then
          return $ sum.inr t
        else do
-         trace format!"running: {h}",
+        --  trace format!"running: {h}",
          c ← h.children,
-         trace format!"children: {c}",
+        --  trace format!"children: {c}",
          return $ sum.inr $ insert_new_states c t
 
 private meta def run : list back_state → tactic back_state

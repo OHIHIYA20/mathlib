@@ -163,6 +163,8 @@ begin
   back? with dvd,
 end
 #check list.tfae_nil
+
+set_option profiler true
 example {a b c : ℕ} (h₁ : a ∣ c) (h₂ : a ∣ b + c) : a ∣ b :=
 begin
   back? with _,
