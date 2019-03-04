@@ -151,8 +151,7 @@ local attribute [dvd]
   nat.dvd_of_mul_dvd_mul_left nat.dvd_of_mul_dvd_mul_right nat.dvd_of_pow_dvd nat.dvd_one
   nat.dvd_sub nat.fact_dvd_fact nat.mul_dvd_mul_iff_left nat.mul_dvd_mul_iff_right nat.mul_dvd_of_dvd_div
   nat.pow_dvd_of_le_of_pow_dvd nat.pow_dvd_pow nat.pow_dvd_pow_of_dvd neg_dvd_iff_dvd neg_dvd_of_dvd one_dvd
--- These two cause trouble, however:
---  nat.dvd_iff_mod_eq_zero nat.dvd_of_mod_eq_zero
+  nat.dvd_iff_mod_eq_zero nat.dvd_of_mod_eq_zero
 
 example {a b c : ℕ} (h₁ : a ∣ c) (h₂ : a ∣ b + c) : a ∣ b :=
 begin
@@ -162,6 +161,11 @@ end
 example {a b c : ℕ} (h₁ : a ∣ c) (h₂ : a ∣ b + c) : a ∣ b :=
 begin
   back? with dvd,
+end
+#check list.tfae_nil
+example {a b c : ℕ} (h₁ : a ∣ c) (h₂ : a ∣ b + c) : a ∣ b :=
+begin
+  back? with _,
 end
 
 end dvd

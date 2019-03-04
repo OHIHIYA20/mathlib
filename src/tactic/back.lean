@@ -4,6 +4,28 @@
 
 import tactic.basic
 
+namespace environment
+meta def decl_omap {α : Type} (e : environment) (f : declaration → option α) : list α :=
+  e.fold [] $ λ d l, match f d with
+                     | some r := r :: l
+                     | none := l
+                     end
+
+meta def decl_map {α : Type} (e : environment) (f : declaration → α) : list α :=
+  e.decl_omap $ λ d, some (f d)
+
+meta def get_decls (e : environment) : list declaration :=
+  e.decl_map id
+
+meta def get_trusted_decl_names (e : environment) : list name :=
+  e.decl_omap (λ d, if d.is_trusted then some d.to_name else none)
+
+#check undefined
+
+meta def get_decl_names (e : environment) : list name :=
+  e.decl_map declaration.to_name
+end environment
+
 namespace tactic
 
 @[user_attribute]
@@ -60,21 +82,25 @@ We track four separate lists of goals.
 (in_progress_fc  : list apply_state := {})
 (num_mvars    : ℕ)
 
+meta def back_state.done (s : back_state) : bool :=
+s.committed_new.empty ∧ s.in_progress_new.empty ∧ s.committed_fc.empty ∧ s.in_progress_fc.empty
+
 -- TODO Think hard about what goes here; possibly allow customisation.
-meta def back_state.complexity (s : back_state) : ℕ × ℕ × ℕ :=
+meta def back_state.complexity (s : back_state) : ℕ × bool × ℕ × ℕ :=
 -- It's essential to put `stashed` first, so that stashed goals are not returned until
 -- we've exhausted other branches of the search tree.
-(s.stashed.length, s.in_progress_fc.length + s.committed_fc.length, s.steps + s.num_mvars) -- this is probably better??
+(s.stashed.length, s.done, 2 * s.in_progress_fc.length + 2 * s.committed_fc.length + s.steps, s.steps + s.num_mvars) -- works!
+-- (s.stashed.length, s.done, 2 * s.in_progress_fc.length + 2 * s.committed_fc.length + s.in_progress_new.length + s.committed_new.length, s.steps + s.num_mvars)
 
 meta instance : has_to_string back_state :=
 { to_string := λ s, to_string format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.committed_new.length}/{s.in_progress_new.length}/{s.committed_fc.length}/{s.in_progress_fc.length}) ({s.num_mvars}/{s.steps})" }
 
+meta instance has_to_format_back_state : has_to_format back_state :=
+{ to_format := λ s, to_string s }
+
 meta instance has_to_tactic_format_back_state : has_to_tactic_format back_state :=
 { to_tactic_format := λ s,
     do return $ to_string s }
-
-meta def back_state.done (s : back_state) : bool :=
-s.committed_new.empty ∧ s.in_progress_new.empty ∧ s.committed_fc.empty ∧ s.in_progress_fc.empty
 
 -- Count the number of arguments not determined by later arguments.
 meta def count_arrows : expr → ℕ
@@ -96,10 +122,10 @@ meta def back_state.init (goal : expr) (progress finishing : list expr) (limit :
    let all_lemmas : list back_lemma :=
      (finishing.enum.map (λ e, ⟨e.2, tt, e.1⟩)) ++
      (progress.enum.map  (λ e, ⟨e.2, ff, e.1 + finishing.length⟩)),
-   lemmas_with_counts ← all_lemmas.mmap (λ e, do c ← count_arrows <$> infer_type e.lem, return (c, e)),
-   let (facts', lemmas) := lemmas_with_counts.partition (λ p : ℕ × back_lemma, p.1 = 0),
-   let facts := facts'.map (λ p, p.2),
-   let sorted_lemmas := ((list.qsort (λ (p q : ℕ × back_lemma), p.1 ≤ q.1) lemmas).map (λ p, p.2)),
+   lemmas_with_counts ← all_lemmas.mmap (λ e, do ty ← infer_type e.lem, return (count_arrows ty, expr.is_pi ty, e)),
+   let (facts', lemmas) := lemmas_with_counts.partition (λ p : ℕ × bool × back_lemma, p.2.1 = ff),
+   let facts := facts'.map (λ p, p.2.2),
+   let sorted_lemmas := ((list.qsort (λ (p q : ℕ × bool × back_lemma), p.1 ≤ q.1) lemmas).map (λ p, p.2.2)),
    trace "facts:",
    trace $ facts.map (λ f, f.lem),
    trace "lemmas:",
@@ -166,13 +192,15 @@ meta def back_state.run_on_bundled_state (s : back_state) {α : Type*} (tac : ta
 
 meta def back_state.apply_lemma (s : back_state) (g : expr) (e : back_lemma) (committed : bool) : tactic (back_state × bool) :=
 s.run_on_bundled_state $
-do trace $ "attempting to apply " ++ to_string e.lem,
+do --trace $ "attempting to apply " ++ to_string e.lem,
    set_goals [g],
    prop ← is_proof g,
    explicit ← (list.empty ∘ expr.list_meta_vars) <$> infer_type g,
-   get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
+   goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
+  --  pad_trace s.steps goal_types,
    apply_thorough e.lem,
-   trace "!",
+   pad_trace s.steps goal_types,
+   trace $  "successfully applied " ++ to_string e.lem,
    get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
   --  goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
   --  pad_trace s.steps e,
@@ -180,6 +208,8 @@ do trace $ "attempting to apply " ++ to_string e.lem,
    (done >> return (s', prop ∧ explicit)) <|> do
    gs ← get_goals,
    types ← gs.mmap infer_type,
+   success_if_fail $ types.mfirst $ λ t, unify t expr.mk_false,
+  --  guard ¬(expr.mk_false ∈ types),
    let num_mvars := (types.map expr.list_meta_vars).join.length,
    as ← gs.mmap $ λ g, return (⟨g, s.facts⟩ : apply_state),
    if e.finishing ∨ committed then
@@ -286,6 +316,12 @@ local attribute [instance] lexicographic_preorder
 -- Just a check that we're actually using lexicographic ordering here.
 example : (5,10) < (10,3) := by exact dec_trivial
 
+def bool_preorder : preorder bool :=
+{ le := λ a b, bor a (bnot b) = tt,
+  le_refl := λ a, begin cases a; simp end,
+  le_trans := λ a b c h₁ h₂, begin cases a; cases b; cases c; simp at *; assumption end }
+local attribute [instance] bool_preorder
+
 private meta def insert_new_state : back_state → list back_state → list back_state
 /- depth first search: -/
 -- | s states := s :: states
@@ -310,16 +346,16 @@ private meta def run_one_step : list back_state → tactic (back_state ⊕ (list
     do if h.steps > h.limit then
          return $ sum.inr t
        else do
+         trace format!"running: {h}",
          c ← h.children,
-         trace "children:",
-         trace c,
+         trace format!"children: {c}",
          return $ sum.inr $ insert_new_states c t
 
 private meta def run : list back_state → tactic back_state
 | states :=
   do
-     trace "run:",
-     trace states,
+    --  trace "run:",
+    --  trace states,
      r ← run_one_step states,
      match r with
      | (sum.inl success) := return success
@@ -385,7 +421,7 @@ meta def back_arg_list : parser (list back_arg_type) :=
 local postfix *:9001 := many
 
 meta def with_back_ident_list : parser (list (name × bool)) :=
-(tk "with" *> (((λ n, (n, ff)) <$> ident_) <|> (tk "!" *> (λ n, (n, tt)) <$> ident_))*) <|> return []
+(tk "with" *> (((λ n, (n, ff)) <$> ident_) <|> (tk "!" *> (λ n, (n, tt)) <$> ident))*) <|> return []
 
 private meta def resolve_exception_ids (all_hyps : bool) :
   list name → list name → list name → tactic (list name × list name)
@@ -416,6 +452,13 @@ do
   (gex, hex) ← resolve_exception_ids all ex [] [],
   return (pr.reverse, fi.reverse, gex, hex, all)
 
+#check name
+meta def all_defs : tactic (list expr) :=
+do env ← get_env,
+   let names := env.get_trusted_decl_names,
+   let names := names.filter $ λ n, n.components.head ≠ ".private" ∧ (to_string n.components.ilast).to_list.head ≠ '_' ∧ to_string n.components.ilast ≠ "inj_arrow",
+   names.mmap mk_const
+
 /--
 Returns a list of "finishing lemmas" (which should only be applied as part of a
 chain of applications which discharges the goal), and a list of "progress lemmas",
@@ -435,6 +478,10 @@ do (extra_pr_lemmas, extra_fi_lemmas, gex, hex, all_hyps) ← decode_back_arg_li
 
    let use_fi := (use.filter (λ p : name × bool, ¬ p.2)).map (λ p, p.1),
    let use_pr := (use.filter (λ p : name × bool, p.2)).map (λ p, p.1),
+
+   environment ← if `_ ∈ use_fi then all_defs else return [],
+   let use_fi := use_fi.erase `_,
+
    with_fi_lemmas ← (list.join <$> use_fi.mmap attribute.get_instances) >>= list.mmap mk_const,
    with_pr_lemmas ← (list.join <$> use_pr.mmap attribute.get_instances) >>= list.mmap mk_const,
 
@@ -451,7 +498,7 @@ do (extra_pr_lemmas, extra_fi_lemmas, gex, hex, all_hyps) ← decode_back_arg_li
 
    let filter_excl : list expr → list expr := list.filter $ λ h, h.const_name ∉ gex,
    return (/- progress  lemmas -/ filter_excl $ extra_pr_lemmas ++ with_pr_lemmas ++ tagged_pr_lemmas,
-           /- finishing lemmas -/ filter_excl $ extra_fi_lemmas ++ with_fi_lemmas ++ hypotheses ++ tagged_fi_lemmas)
+           /- finishing lemmas -/ filter_excl $ extra_fi_lemmas ++ environment ++ with_fi_lemmas ++ hypotheses ++ tagged_fi_lemmas)
 
 meta def replace_mvars (e : expr) : expr :=
 e.replace (λ e' _, if e'.is_meta_var then some (unchecked_cast pexpr.mk_placeholder) else none)
@@ -464,7 +511,7 @@ open interactive interactive.types expr
 `back` performs backwards reasoning, recursively applying lemmas against the goal.
 
 Lemmas can be specified via an optional argument, e.g. as `back [foo, bar]`. Every lemma
-tagged with an attribute `qux` may be included using the syntax `back using qux`.
+tagged with an attribute `qux` may be included using the syntax `back with qux`.
 Additionally, `back` always includes any lemmas tagged with the attribute `@[back]`,
 and all local propositional hypotheses.
 
@@ -475,7 +522,7 @@ Lemmas which were included because of the `@[back]` attribute, or local hypothes
 can be excluded using the notation `back [-h]`.
 
 Further, lemmas can be tagged with the `@[back!]` attribute, or appear in the arguments with
-a leading `!`, e.g. as `back [!foo]` or `back using !qux`. The tactic `back` will return
+a leading `!`, e.g. as `back [!foo]` or `back with !qux`. The tactic `back` will return
 successfully if it either discharges the goal, or applies at least one `!` lemma.
 (More precisely, `back` will apply some non-empty and maximal collection of the lemmas,
 subject to the condition that if any lemma not marked with `!` is applied, all resulting
@@ -488,7 +535,7 @@ for use with `refine`.)
 
 `back` will apply lemmas even if this introduces new metavariables (so for example it is possible
 to apply transitivity lemmas), but with the proviso that any subgoals containing metavariables must
-be subsequently discharged in a single step.
+be subsequently discharged in a single step. -- FIXME this is no longer what's implemented!
 -/
 meta def back
   (trace : parse $ optional (tk "?")) (no_dflt : parse only_flag)
