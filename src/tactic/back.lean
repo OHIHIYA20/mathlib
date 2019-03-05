@@ -41,6 +41,7 @@ meta def head_symbols : expr → list name
 | (expr.pi _ _ _ t) := head_symbols t
 | `(%%a ↔ %%b) := head_symbols a ++ head_symbols b
 | (expr.app f _) := head_symbols f
+| `(not) := [`not, `false]
 | (expr.const n _) := [n]
 | _ := [`_]
 
@@ -49,6 +50,7 @@ meta def symbols : expr → list name
 | (expr.app f _) := head_symbols f
 | (expr.const n _) := [n]
 | _ := [`_]
+
 
 @[user_attribute]
 meta def back_attribute : user_attribute (rb_map name (list name)) (option unit) := {
@@ -109,6 +111,15 @@ inductive apply_step
 
 open apply_step
 
+meta instance : preorder apply_step :=
+{ le := λ a b, match a, b with
+    | facts,    _ := true
+    | relevant, _ := true
+    | others,   _ := true
+    end,
+  le_refl := λ a, begin cases a; simp end,
+  le_trans := λ a b c h₁ h₂, undefined }
+
 def apply_step.weight : apply_step → ℕ
 | apply_step.facts := 1
 | apply_step.relevant := 4
@@ -136,7 +147,6 @@ meta structure back_state :=
 (stashed      : list expr := {})   -- Stores goals which we're going to return to the user.
 (completed    : list expr := {})   -- Stores completed goals.
 (goals        : list apply_state)
-(num_mvars    : ℕ)
 
 meta def back_state.goal_counts (s : back_state) : ℕ × ℕ × ℕ × ℕ × ℕ × ℕ :=
 (
@@ -150,7 +160,7 @@ meta def back_state.goal_counts (s : back_state) : ℕ × ℕ × ℕ × ℕ × �
 
 meta instance : has_to_string back_state :=
 { to_string := λ s, to_string
-  format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.goal_counts}) ({s.num_mvars}/{s.steps})" }
+  format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.goal_counts}) ({s.steps})" }
 
 meta instance has_to_format_back_state : has_to_format back_state :=
 { to_format := λ s, to_string s }
@@ -168,7 +178,7 @@ meta def back_state.complexity (s : back_state) : ℕ × bool × ℕ × ℕ :=
 -- we've exhausted other branches of the search tree.
 -- (s.stashed.length, s.done, 2 * s.in_progress_fc.length + 2 * s.committed_fc.length + s.steps, s.steps + s.num_mvars) -- works!
 -- (s.stashed.length, s.done, 16 * s.in_progress_fc.length + 16 * s.committed_fc.length + 4 * s.in_progress_new.length + 4 * s.committed_new.length + s.steps, s.steps + s.num_mvars)
-(s.stashed.length, s.done, 4 * (list.foldl (+) 0 (s.goals.map (λ as : apply_state, as.step.weight))) + s.steps, s.steps + s.num_mvars)
+(s.stashed.length, s.done, 4 * (list.foldl (+) 0 (s.goals.map (λ as : apply_state, as.step.weight))) + s.steps, s.steps)
 
 -- Count the number of arguments not determined by later arguments.
 meta def count_arrows : expr → ℕ
@@ -195,10 +205,10 @@ meta def back_state.init (goal : expr) (progress finishing : list expr) (limit :
    let facts := facts'.map (λ p, p.2.2),
    let sorted_lemmas := ((list.qsort (λ (p q : ℕ × bool × back_lemma), p.1 ≤ q.1) lemmas).map (λ p, p.2.2)),
   --  let sorted_lemmas := lemmas.map (λ p, p.2.2),
-  --  trace "facts:",
-  --  trace $ facts.map (λ f, f.lem),
-  --  trace "lemmas:",
-  --  trace $ sorted_lemmas.map (λ f, f.lem),
+   trace "facts:",
+   trace $ facts.map (λ f, f.lem),
+   trace "lemmas:",
+   sorted_lemmas.mmap (λ f, (do t ← infer_type f.lem, return (f.lem, head_symbols t))) >>= trace,
    goal_type ← infer_type goal,
    let first_goal : apply_state :=
    { goal := goal,
@@ -212,8 +222,7 @@ meta def back_state.init (goal : expr) (progress finishing : list expr) (limit :
      facts        := facts,
      lemmas       := sorted_lemmas,
      tactic_state := s, -- We steal the current tactic state, and stash a copy inside.
-     goals        := [first_goal],
-     num_mvars    := 0 }) s
+     goals        := [first_goal] }) s
 
 -- keep only uninstantiable metavariables
 meta def partition_mvars (L : list expr) : tactic (list expr × list expr) :=
@@ -260,6 +269,16 @@ meta def back_state.run_on_bundled_state (s : back_state) {α : Type*} (tac : ta
   | result.exception msg pos sts' := result.exception msg pos ts
   end
 
+meta def apply_state.insert_into (a : apply_state) : list apply_state → list apply_state
+| [] := [a]
+| (h :: t) :=
+if a.step.weight ≤ h.step.weight then a :: h :: t else h :: (apply_state.insert_into t)
+
+meta def back_state.add_goal (s : back_state) (as : apply_state) :=
+{ goals := as.insert_into s.goals .. s }
+meta def back_state.add_goals (s : back_state) (as : list apply_state) : back_state :=
+as.foldl (λ s a, s.add_goal a) s
+
 meta def back_state.apply_lemma (s : back_state) (g : expr) (e : back_lemma) (step : apply_step) (committed : bool) : tactic (back_state × bool) :=
 s.run_on_bundled_state $
 do --trace $ "attempting to apply " ++ to_string e.lem,
@@ -280,15 +299,11 @@ do --trace $ "attempting to apply " ++ to_string e.lem,
    types ← gs.mmap infer_type,
    success_if_fail $ types.mfirst $ λ t, unify t expr.mk_false,
   --  guard ¬(expr.mk_false ∈ types),
-   let num_mvars := (types.map expr.list_meta_vars).join.length,
    as ← gs.mmap $ λ g, (do
          t ← infer_type g,
          relevant_facts ← filter_lemmas t s.facts,
          return { apply_state . goal := g, goal_type := t, committed := e.finishing ∨ committed, step := apply_step.facts, lemmas := relevant_facts }),
-   return ({ goals := as ++ s.goals, num_mvars := num_mvars, ..s' }, ff)
-
-meta def back_state.add_goal (s : back_state) (as : apply_state) :=
-{ goals := as :: s.goals .. s }
+   return (s'.add_goals as, ff)
 
 meta def back_state.apply (s : back_state) : apply_state → tactic (list back_state)
 | as :=
@@ -312,16 +327,23 @@ match s.goals with
 | [] := undefined
 | (g :: gs) :=
   do let s' := { goals := gs, ..s },
+     g_pp ← pp g.goal_type,
+     trace format!"working on goal {g_pp}",
+     match g.step with
+     | facts := trace format!"facts: {g.lemmas.map back_lemma.lem}"
+     | relevant := trace format!"relevant: {g.lemmas.map back_lemma.lem}"
+     | others := trace format!"others: [...({g.lemmas.length})]"
+     end,
      s'.apply g <|>
      -- If no lemma from that step applied, we move on to the next step
      match (g.committed, g.step) with
      -- After trying to apply all the facts, we assemble the relevant lemmas and try those
      | (_, apply_step.facts)     :=
         do relevant_lemmas ← filter_lemmas g.goal_type s.lemmas,
-           return [{ goals := { lemmas := relevant_lemmas, step := apply_step.relevant, ..g } :: s'.goals, .. s' }]
+           return [s'.add_goal { lemmas := relevant_lemmas, step := apply_step.relevant, ..g }]
      -- After trying to apply all the relevant lemmas, we just try everything.
      | (_, apply_step.relevant)  :=
-        do return [{ goals := { lemmas := s.lemmas, step := apply_step.others, ..g } :: s'.goals, .. s' }] -- FIXME remove stuff we've done in earlier steps?
+        do return [s'.add_goal { lemmas := s.lemmas, step := apply_step.others, ..g }] -- FIXME remove stuff we've done in earlier steps?
      -- Finally, if we were committed, we now fail:
      | (tt, apply_step.others)   := return []
      -- But if we were not committed, we stash the goal:
