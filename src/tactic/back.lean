@@ -3,7 +3,7 @@
 -- Authors: Scott Morrison, Keeley Hoek
 
 import tactic.basic
--- import data.list.basic
+import data.list.defs
 
 namespace environment
 meta def decl_omap {α : Type} (e : environment) (f : declaration → option α) : list α :=
@@ -86,6 +86,7 @@ resulting subgoals cannot all be discharged.",
 
 meta structure back_lemma :=
 (lem       : expr)
+(ty        : expr)
 (finishing : bool)
 (index     : ℕ)
 
@@ -132,6 +133,7 @@ meta structure back_state :=
 -- (e.g. we don't use `iff` lemmas more than once, to avoid loops) -/
 (facts        : list back_lemma) -- A `fact` is a lemma with no hypotheses; usually a local hypothesis
 (lemmas       : list back_lemma) -- All other lemmas
+(lemma_map    : rb_map name (list back_lemma))
 /- We carry along an internal `tactic_state`,
 -- so metavariables aren't contaminated by other branches of the search. -/
 (tactic_state : tactic_state)
@@ -187,31 +189,43 @@ do M ← L.mmap (λ e, do c ← count_arrows <$> infer_type e.lem, return (c, e)
 
 meta def back_state.init (goal : expr) (progress finishing : list expr) (limit : option ℕ) : tactic back_state :=
 λ s, (do
-   -- We sort the lemmas, preferring lemmas which, when applied, will produce fewer new goals.
-   let all_lemmas : list back_lemma :=
-     (finishing.enum.map (λ e, ⟨e.2, tt, e.1⟩)) ++
-     (progress.enum.map  (λ e, ⟨e.2, ff, e.1 + finishing.length⟩)),
-   lemmas_with_counts ← all_lemmas.mmap (λ e, do ty ← infer_type e.lem, return (count_arrows ty, expr.is_pi ty, e)),
-   let (facts', lemmas) := lemmas_with_counts.partition (λ p : ℕ × bool × back_lemma, p.2.1 = ff),
-   let facts := facts'.map (λ p, p.2.2),
-  --  let sorted_lemmas := ((list.qsort (λ (p q : ℕ × bool × back_lemma), p.1 ≤ q.1) lemmas).map (λ p, p.2.2)),
-   let sorted_lemmas := lemmas.map (λ p, p.2.2),
-   trace "facts:",
-   trace $ facts.map (λ f, f.lem),
-   trace "lemmas:",
-   sorted_lemmas.mmap (λ f, (do t ← infer_type f.lem, return (f.lem, head_symbols t))) >>= trace,
+   finishing_lemmas ← finishing.enum.mmap
+     (λ e, do t ← infer_type e.2, pure { back_lemma . lem := e.2, ty := t, finishing := tt, index := e.1 }),
+   progress_lemmas  ← progress .enum.mmap
+     (λ e, do t ← infer_type e.2, pure { back_lemma . lem := e.2, ty := t, finishing := ff, index := e.1 }),
+   let all_lemmas := finishing_lemmas ++ progress_lemmas,
+
+  /- We (used to!) sort the lemmas, preferring lemmas which, when applied, will produce fewer new goals. -/
+  --  lemmas_with_counts ← all_lemmas.mmap (λ e, do ty ← infer_type e.lem, return (count_arrows ty, expr.is_pi ty, e)),
+  --  let (facts', lemmas') := lemmas_with_counts.partition (λ p : ℕ × bool × back_lemma, p.2.1 = ff),
+  --  let facts := facts'.map (λ p, p.2.2),
+  -- --  let lemmas := ((list.qsort (λ (p q : ℕ × bool × back_lemma), p.1 ≤ q.1) lemmas').map (λ p, p.2.2)),
+  --  let lemmas := lemmas'.map (λ p, p.2.2),
+
+   let (lemmas', facts') := all_lemmas.partition (λ p : back_lemma, expr.is_pi p.ty),
+
+   let lemma_map : rb_map name (list back_lemma) :=
+     lemmas'.foldl (λ m l,
+            (head_symbols l.ty).erase_dup.foldl (λ m i, m.insert_cons i l) m)
+            (rb_map.mk _ _),
+
+  --  trace "facts:",
+  --  trace $ facts.map (λ f, f.lem),
+  --  trace "lemmas:",
+  --  sorted_lemmas.mmap (λ f, (do t ← infer_type f.lem, return (f.lem, head_symbols t))) >>= trace,
    goal_type ← infer_type goal,
    let first_goal : apply_state :=
-   { goal := goal,
+   { goal      := goal,
      goal_type := goal_type,
      committed := ff,
-     step := apply_step.facts,
-     lemmas := facts },
+     step      := apply_step.facts,
+     lemmas    := facts' },
    return
    { back_state .
      limit        := limit.get_or_else 20,
-     facts        := facts,
-     lemmas       := sorted_lemmas,
+     facts        := facts',
+     lemmas       := lemmas',
+     lemma_map    := lemma_map,
      tactic_state := s, -- We steal the current tactic state, and stash a copy inside.
      goals        := [first_goal] }) s
 
@@ -277,13 +291,10 @@ do --trace $ "attempting to apply " ++ to_string e.lem,
    prop ← is_proof g,
    explicit ← (list.empty ∘ expr.list_meta_vars) <$> infer_type g,
    goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
-  --  pad_trace s.steps goal_types,
    apply_thorough e.lem,
-   pad_trace s.steps goal_types,
-   trace $  "successfully applied " ++ to_string e.lem,
-   get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
-  --  goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
-  --  pad_trace s.steps e,
+  --  pad_trace s.steps goal_types,
+  --  trace $  "successfully applied " ++ to_string e.lem,
+  --  get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
    s' ← s.clean g e,
    (done >> return (s', prop ∧ explicit)) <|> do
    gs ← get_goals,
@@ -292,7 +303,7 @@ do --trace $ "attempting to apply " ++ to_string e.lem,
   --  guard ¬(expr.mk_false ∈ types),
    as ← gs.mmap $ λ g, (do
          t ← infer_type g,
-         relevant_facts ← filter_lemmas t s.facts,
+         relevant_facts ← filter_lemmas t s.facts, -- FIXME decide what to do now
          return { apply_state . goal := g, goal_type := t, committed := e.finishing ∨ committed, step := apply_step.facts, lemmas := relevant_facts }),
    return (s'.add_goals as, ff)
 
@@ -319,18 +330,18 @@ match s.goals with
 | (g :: gs) :=
   do let s' := { goals := gs, ..s },
      g_pp ← pp g.goal_type,
-     trace format!"working on goal {g_pp}",
-     match g.step with
-     | facts := trace format!"facts: {g.lemmas.map back_lemma.lem}"
-     | relevant := trace format!"relevant: {g.lemmas.map back_lemma.lem}"
-     | others := trace format!"others: [...({g.lemmas.length})]"
-     end,
+    --  trace format!"working on goal {g_pp}",
+    --  match g.step with
+    --  | facts := trace format!"facts: {g.lemmas.map back_lemma.lem}"
+    --  | relevant := trace format!"relevant: {g.lemmas.map back_lemma.lem}"
+    --  | others := trace format!"others: [...({g.lemmas.length})]"
+    --  end,
      s'.apply g <|>
      -- If no lemma from that step applied, we move on to the next step
      match (g.committed, g.step) with
      -- After trying to apply all the facts, we assemble the relevant lemmas and try those
      | (_, apply_step.facts)     :=
-        do relevant_lemmas ← filter_lemmas g.goal_type s.lemmas,
+        do let relevant_lemmas := (s.lemma_map.find (head_symbol g.goal_type)).get_or_else [],
            return [s'.add_goal { lemmas := relevant_lemmas, step := apply_step.relevant, ..g }]
      -- After trying to apply all the relevant lemmas, we just try everything.
      | (_, apply_step.relevant)  :=
@@ -394,9 +405,9 @@ private meta def run_one_step : list back_state → tactic (back_state ⊕ (list
     do if h.steps > h.limit then
          return $ sum.inr t
        else do
-         trace format!"running: {h}",
+        --  trace format!"running: {h}",
          c ← h.children,
-         trace format!"children: {c}",
+        --  trace format!"children: {c}",
          return $ sum.inr $ insert_new_states c t
 
 private meta def run : list back_state → tactic back_state
