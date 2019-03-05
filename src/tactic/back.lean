@@ -111,15 +111,6 @@ inductive apply_step
 
 open apply_step
 
-meta instance : preorder apply_step :=
-{ le := λ a b, match a, b with
-    | facts,    _ := true
-    | relevant, _ := true
-    | others,   _ := true
-    end,
-  le_refl := λ a, begin cases a; simp end,
-  le_trans := λ a b c h₁ h₂, undefined }
-
 def apply_step.weight : apply_step → ℕ
 | apply_step.facts := 1
 | apply_step.relevant := 4
@@ -203,8 +194,8 @@ meta def back_state.init (goal : expr) (progress finishing : list expr) (limit :
    lemmas_with_counts ← all_lemmas.mmap (λ e, do ty ← infer_type e.lem, return (count_arrows ty, expr.is_pi ty, e)),
    let (facts', lemmas) := lemmas_with_counts.partition (λ p : ℕ × bool × back_lemma, p.2.1 = ff),
    let facts := facts'.map (λ p, p.2.2),
-   let sorted_lemmas := ((list.qsort (λ (p q : ℕ × bool × back_lemma), p.1 ≤ q.1) lemmas).map (λ p, p.2.2)),
-  --  let sorted_lemmas := lemmas.map (λ p, p.2.2),
+  --  let sorted_lemmas := ((list.qsort (λ (p q : ℕ × bool × back_lemma), p.1 ≤ q.1) lemmas).map (λ p, p.2.2)),
+   let sorted_lemmas := lemmas.map (λ p, p.2.2),
    trace "facts:",
    trace $ facts.map (λ f, f.lem),
    trace "lemmas:",
