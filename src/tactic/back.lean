@@ -101,15 +101,18 @@ do -- trace format!"filtering lemmas for {goal_type}",
    -- trace $ result.map back_lemma.lem,
    return result
 
+@[derive decidable_eq]
 inductive apply_step
 | facts    -- We're working on lemmas with no hypotheses (likely all local hypotheses).
 | relevant -- We're working on lemmas with the same head constant as the goal.
 | others   -- We're getting desperate, and working on all remaining lemmas.
 
+open apply_step
+
 def apply_step.weight : apply_step → ℕ
 | apply_step.facts := 1
 | apply_step.relevant := 4
-| apply_step.others := 16
+| apply_step.others := 5
 
 -- An expr representing a goal, along with a list of lemmas which we have not yet tried
 -- `apply`ing against that goal.
@@ -135,15 +138,26 @@ meta structure back_state :=
 (goals        : list apply_state)
 (num_mvars    : ℕ)
 
--- meta instance : has_to_string back_state :=
--- { to_string := λ s, to_string format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.committed_new.length}/{s.in_progress_new.length}/{s.committed_fc.length}/{s.in_progress_fc.length}) ({s.num_mvars}/{s.steps})" }
+meta def back_state.goal_counts (s : back_state) : ℕ × ℕ × ℕ × ℕ × ℕ × ℕ :=
+(
+  (s.goals.filter(λ g : apply_state, g.step = facts    ∧ g.committed)).length,
+  (s.goals.filter(λ g : apply_state, g.step = relevant ∧ g.committed)).length,
+  (s.goals.filter(λ g : apply_state, g.step = others   ∧ g.committed)).length,
+  (s.goals.filter(λ g : apply_state, g.step = facts    ∧ ¬ g.committed)).length,
+  (s.goals.filter(λ g : apply_state, g.step = relevant ∧ ¬ g.committed)).length,
+  (s.goals.filter(λ g : apply_state, g.step = others   ∧ ¬ g.committed)).length
+)
 
--- meta instance has_to_format_back_state : has_to_format back_state :=
--- { to_format := λ s, to_string s }
+meta instance : has_to_string back_state :=
+{ to_string := λ s, to_string
+  format!"back_state: ({s.stashed.length}/{s.completed.length}) ({s.goal_counts}) ({s.num_mvars}/{s.steps})" }
 
--- meta instance has_to_tactic_format_back_state : has_to_tactic_format back_state :=
--- { to_tactic_format := λ s,
---     do return $ to_string s }
+meta instance has_to_format_back_state : has_to_format back_state :=
+{ to_format := λ s, to_string s }
+
+meta instance has_to_tactic_format_back_state : has_to_tactic_format back_state :=
+{ to_tactic_format := λ s,
+    do return $ to_string s }
 
 meta def back_state.done (s : back_state) : bool :=
 s.goals.empty
@@ -255,9 +269,9 @@ do --trace $ "attempting to apply " ++ to_string e.lem,
    goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
   --  pad_trace s.steps goal_types,
    apply_thorough e.lem,
-  --  pad_trace s.steps goal_types,
-  --  trace $  "successfully applied " ++ to_string e.lem,
-  --  get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
+   pad_trace s.steps goal_types,
+   trace $  "successfully applied " ++ to_string e.lem,
+   get_goals >>= λ gs, gs.mmap infer_type >>= pad_trace s.steps,
   --  goal_types ← get_goals >>= λ gs, gs.mmap infer_type,
   --  pad_trace s.steps e,
    s' ← s.clean g e,
@@ -367,9 +381,9 @@ private meta def run_one_step : list back_state → tactic (back_state ⊕ (list
     do if h.steps > h.limit then
          return $ sum.inr t
        else do
-        --  trace format!"running: {h}",
+         trace format!"running: {h}",
          c ← h.children,
-        --  trace format!"children: {c}",
+         trace format!"children: {c}",
          return $ sum.inr $ insert_new_states c t
 
 private meta def run : list back_state → tactic back_state
