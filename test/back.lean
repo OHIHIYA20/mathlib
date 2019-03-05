@@ -6,7 +6,7 @@ open tactic
 
 example : true :=
 begin
-  lock_tactic_state $ (do e ← to_expr ``(prime.not_dvd_one) >>= infer_type, trace (head_symbols e)),
+  lock_tactic_state $ (do e ← to_expr ``(prime.not_dvd_one) >>= infer_type, trace (tactic.back.head_symbols e)),
   trivial
 end
 
@@ -178,3 +178,15 @@ begin
 end
 
 end dvd
+
+section nat
+
+lemma div_dvd_of_dvd' {a b : ℕ} (h : b ∣ a) : (a / b) ∣ a :=
+-- The mathlib proof is: `⟨b, (nat.div_mul_cancel h).symm⟩`
+by back? with _
+
+lemma div_dvd_of_dvd {a b : ℕ} (h : b ∣ a) : (a / b) ∣ a :=
+-- The mathlib proof is: `⟨b, (nat.div_mul_cancel h).symm⟩`
+by back? [-div_dvd_of_dvd] with _
+-- We get: `dvd.intro b (nat.div_mul_cancel h)`
+end nat

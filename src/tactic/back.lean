@@ -18,6 +18,9 @@ meta def decl_map {α : Type} (e : environment) (f : declaration → α) : list 
 meta def get_decls (e : environment) : list declaration :=
   e.decl_map id
 
+meta def get_trusted_decls (e : environment) : list declaration :=
+  e.decl_omap (λ d, if d.is_trusted then some d else none)
+
 meta def get_trusted_decl_names (e : environment) : list name :=
   e.decl_omap (λ d, if d.is_trusted then some d.to_name else none)
 
@@ -28,8 +31,7 @@ end environment
 namespace tactic
 open native
 
-/-- Stub for implementing faster lemma filtering using Pi binders in the goal -/
-private meta def is_lemma_applicable (lem : expr) : tactic bool := return true
+namespace back
 
 meta def head_symbol : expr → name
 | (expr.pi _ _ _ t) := head_symbol t
@@ -187,13 +189,8 @@ meta def sort_by_arrows (L : list back_lemma) : tactic (list back_lemma) :=
 do M ← L.mmap (λ e, do c ← count_arrows <$> infer_type e.lem, return (c, e)),
    return ((list.qsort (λ (p q : ℕ × back_lemma), p.1 ≤ q.1) M).map (λ p, p.2))
 
-meta def back_state.init (goal : expr) (progress finishing : list expr) (limit : option ℕ) : tactic back_state :=
+meta def back_state.init (goal : expr) (lemmas : list back_lemma) (limit : option ℕ) : tactic back_state :=
 λ s, (do
-   finishing_lemmas ← finishing.enum.mmap
-     (λ e, do t ← infer_type e.2, pure { back_lemma . lem := e.2, ty := t, finishing := tt, index := e.1 }),
-   progress_lemmas  ← progress .enum.mmap
-     (λ e, do t ← infer_type e.2, pure { back_lemma . lem := e.2, ty := t, finishing := ff, index := e.1 }),
-   let all_lemmas := finishing_lemmas ++ progress_lemmas,
 
   /- We (used to!) sort the lemmas, preferring lemmas which, when applied, will produce fewer new goals. -/
   --  lemmas_with_counts ← all_lemmas.mmap (λ e, do ty ← infer_type e.lem, return (count_arrows ty, expr.is_pi ty, e)),
@@ -202,7 +199,7 @@ meta def back_state.init (goal : expr) (progress finishing : list expr) (limit :
   -- --  let lemmas := ((list.qsort (λ (p q : ℕ × bool × back_lemma), p.1 ≤ q.1) lemmas').map (λ p, p.2.2)),
   --  let lemmas := lemmas'.map (λ p, p.2.2),
 
-   let (lemmas', facts') := all_lemmas.partition (λ p : back_lemma, expr.is_pi p.ty),
+   let (lemmas', facts') := lemmas.partition (λ p : back_lemma, expr.is_pi p.ty),
 
    let lemma_map : rb_map name (list back_lemma) :=
      lemmas'.foldl (λ m l,
@@ -437,9 +434,9 @@ private meta def run' : list back_state → tactic back_state
 
     `back` succeeds if at least one progress lemma was applied, or all goals are discharged.
     -/
-meta def back (progress finishing : list expr) (limit : option ℕ) : tactic unit :=
+meta def back (lemmas : list back_lemma) (limit : option ℕ) : tactic unit :=
 do g :: gs ← get_goals,
-   i ← back_state.init g progress finishing limit,
+   i ← back_state.init g lemmas limit,
    f ← run' [i],
    set_goals [g],
    g ← instantiate_mvars g,
@@ -511,13 +508,14 @@ do
   (gex, hex) ← resolve_exception_ids all ex [] [],
   return (pr.reverse, fi.reverse, gex, hex, all)
 
-meta def all_defs : tactic (list expr) :=
+meta def all_defs_except (gex : list name): tactic (list (expr × expr)) :=
 do env ← get_env,
-   let names := env.get_trusted_decl_names,
-   let names := names.filter $ λ n,
-     n.components.head ≠ "_private" ∧ (to_string n.components.ilast).to_list.head ≠ '_'
+   let decls := env.get_trusted_decls,
+   let decls := decls.filter $ λ d, let n := d.to_name in
+     ¬ d.to_name ∈ gex ∧ n.components.head ≠ "_private" ∧ (to_string n.components.ilast).to_list.head ≠ '_'
        ∧ to_string n.components.ilast ≠ "inj_arrow" ∧ to_string n.components.ilast ≠ "cases_on",
-   names.mmap mk_const
+
+   decls.mmap (λ d : declaration, do e ← mk_const d.to_name, return (e, d.type))
 
 /--
 Returns a list of "finishing lemmas" (which should only be applied as part of a
@@ -526,7 +524,7 @@ the successful application of any one of which counting as a success.
 -/
 --This is a close relative of `mk_assumption_set` in tactic/interactive.lean.
 meta def mk_assumption_set (no_dflt : bool) (hs : list back_arg_type) (use : list (name × bool)) :
-  tactic (list expr × list expr) :=
+  tactic (list back_lemma) :=
 do (extra_pr_lemmas, extra_fi_lemmas, gex, hex, all_hyps) ← decode_back_arg_list hs,
    /- `extra_lemmas` is explicitly requested lemmas
       `gex` are the excluded names
@@ -539,7 +537,7 @@ do (extra_pr_lemmas, extra_fi_lemmas, gex, hex, all_hyps) ← decode_back_arg_li
    let use_fi := (use.filter (λ p : name × bool, ¬ p.2)).map (λ p, p.1),
    let use_pr := (use.filter (λ p : name × bool, p.2)).map (λ p, p.1),
 
-   environment ← if `_ ∈ use_fi then all_defs else return [],
+   environment ← if `_ ∈ use_fi then all_defs_except gex else return [],
    let use_fi := use_fi.erase `_,
 
    with_fi_lemmas ← (list.join <$> use_fi.mmap attribute.get_instances) >>= list.mmap mk_const,
@@ -557,11 +555,23 @@ do (extra_pr_lemmas, extra_fi_lemmas, gex, hex, all_hyps) ← decode_back_arg_li
      local_context >>= list.mfilter (λ e, is_proof e),
 
    let filter_excl : list expr → list expr := list.filter $ λ h, h.const_name ∉ gex,
-   return (/- progress  lemmas -/ filter_excl $ extra_pr_lemmas ++ with_pr_lemmas ++ tagged_pr_lemmas,
-           /- finishing lemmas -/ filter_excl $ extra_fi_lemmas ++ environment ++ with_fi_lemmas ++ hypotheses ++ tagged_fi_lemmas)
+
+   progress_lemmas ← (filter_excl $ extra_pr_lemmas ++ with_pr_lemmas ++ tagged_pr_lemmas).enum.mmap
+     (λ l, do t ← infer_type l.2, return { back_lemma . lem := l.2 , ty := t, finishing := ff, index := l.1 }),
+   finishing_lemmas ← (filter_excl $ extra_fi_lemmas ++ with_fi_lemmas ++ hypotheses ++ tagged_fi_lemmas).enum.mmap
+     (λ l, do t ← infer_type l.2, return { back_lemma . lem := l.2 , ty := t, finishing := tt, index := l.1 + progress_lemmas.length }),
+   let environment_lemmas := environment.enum.map (λ p, { back_lemma . lem := p.2.1, ty := p.2.2, finishing := tt, index := p.1 + progress_lemmas.length + finishing_lemmas.length }),
+
+   return $ progress_lemmas ++ finishing_lemmas ++ environment_lemmas
 
 meta def replace_mvars (e : expr) : expr :=
 e.replace (λ e' _, if e'.is_meta_var then some (unchecked_cast pexpr.mk_placeholder) else none)
+
+end back
+
+open back
+open lean lean.parser expr interactive.types
+open tactic
 
 namespace interactive
 
@@ -601,9 +611,9 @@ meta def back
   (trace : parse $ optional (tk "?")) (no_dflt : parse only_flag)
   (hs : parse back_arg_list) (wth : parse with_back_ident_list) (limit : parse (optional small_nat)) : tactic string :=
 do g :: _ ← get_goals,
-   (pr, fi) ← tactic.mk_assumption_set no_dflt hs wth,
+   lemmas ← tactic.back.mk_assumption_set no_dflt hs wth,
    r ← (do
-     tactic.back pr fi limit,
+     tactic.back.back lemmas limit,
      g ← instantiate_mvars g,
      r ← pp (replace_mvars g),
      pure (if g.has_meta_var then sformat!"refine {r}" else sformat!"exact {r}")),
